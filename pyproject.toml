@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "firm_ai_abm"
+version = "0.1.0"
+description = "Agent-based simulation of tech firms responding to AI"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=1.26",
+  "pandas>=2.1",
+  "matplotlib>=3.8",
+  "seaborn>=0.13",
+  "jupyter>=1.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["firm_ai_abm*"]
