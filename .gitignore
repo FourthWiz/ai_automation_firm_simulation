@@ -1,0 +1,12 @@
+.workflow_artifacts/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.DS_Store
+.ipynb_checkpoints/
+results/figures/*.png
+results/figures/*.svg
