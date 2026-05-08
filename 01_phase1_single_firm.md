@@ -32,9 +32,11 @@ For each task `i` per period, the firm picks `m_i ∈ {H, A, T}`:
 
 | Mode | Productivity per task | Cost per task per period |
 |---|---|---|
-| H (human) | `q_h` | `w / N` (a worker covers `N` tasks) |
-| A (augmented human) | `q_h · (1 + g · β_i)` | `w / N + c_aug` |
+| H (human) | `q_h` | `0` (wages are per worker, not per task — see §4) |
+| A (augmented human) | `q_h · (1 + g · β_i)` | `c_aug` |
 | T (auTomated) | `q_a · α_i` | `c_auto` |
+
+**Note on wages.** Wages are charged per worker, not per task. Worker count `K` is computed from §4's integerization rule (`K = ceil(#H_or_A / tasks_per_worker)`). The simulate loop adds `w · K` to total cost per period, separately from the per-task cost column above. This makes the §10 baseline formula (`p · q_h · N − w · K − F`) follow directly from this table plus the per-period `w · K` charge plus the fixed cost `F`.
 
 **Output:**
 ```
@@ -56,12 +58,14 @@ where `F` is fixed cost (rent, overhead).
 
 ## 3. Adjustment costs
 
-Switching the mode of a task incurs a cost paid in the period of the change:
+Switching the mode of a task incurs a cost paid in the period of the change. Phase 1 uses two distinct accounting rules — per-task for training, per-worker (lumpy) for hiring and firing:
 
-- `H → A`: training cost `c_train` per task converted.
-- `H → T`: firing cost `c_fire / N` per task (a fraction of a worker is displaced).
-- `A → T`: same firing cost.
-- `T → H` or `T → A`: hiring cost `c_hire / N` per task.
+- `H → A`: training cost `c_train` per task converted (per-task — training is task-specific).
+- `H → T`, `A → T`, `T → H`, `T → A`: NO per-task cost. Hiring and firing are paid once per period at the worker level, after the new workforce `K_new` is computed:
+  - firing cost: `c_fire · max(0, K_prev − K_new)`
+  - hiring cost: `c_hire · max(0, K_new − K_prev)`
+
+Per-task `c_fire/N` and `c_hire/N` charges are **not** used. Workers are integer (§4); a few task switches that don't cross a worker boundary cost zero in hire/fire — this is intentional and shows up in greedy behavior.
 
 These matter because pure strategies will look much better than they should without them. Without firing costs, switching to "automate-all" is free; with them, the timing of the switch matters.
 
