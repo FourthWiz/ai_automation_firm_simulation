@@ -1,5 +1,6 @@
 .workflow_artifacts/
 .venv/
+.claude/
 __pycache__/
 *.pyc
 *.pyo
