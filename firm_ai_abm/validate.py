@@ -32,7 +32,10 @@ flat segment at boundary grid points. The phase-doc wording "monotonically
 increases" is interpreted as weakly monotone per stage-three plan §Decisions.
 """
 
+import os
+import subprocess
 from dataclasses import fields, replace
+from pathlib import Path
 
 import numpy as np
 
@@ -364,6 +367,96 @@ def check5_numeraire(firm_factory) -> tuple[bool, dict]:
 
 
 # ---------------------------------------------------------------------------
+# Check 7: Phase 1 degenerate parity (Tier A — Phase 1.5 Stage 1)
+# ---------------------------------------------------------------------------
+
+
+def check7_phase1_parity(firm_factory) -> tuple[bool, dict]:
+    """Check 7: With sigma_theta=sigma_w=0, Phase 1.5 history is byte-identical to Phase 1.
+
+    Reads parquet fixtures from tests/fixtures/ (captured before kernel edits,
+    see D-07 provenance sentinel). Verifies columns t, Y, C, pi, K, adj_cost
+    are np.array_equal to the Phase 1 baseline for all 5 strategies.
+
+    D-07 provenance sentinel: reads tests/fixtures/_provenance.txt and raises
+    RuntimeError if git_dirty_files != 0 or the file is absent.
+
+    Returns:
+        (passed, details) where details = {
+            "per_strategy": {<name>: {"passed": bool, "max_dev_per_col": dict}},
+            "provenance_ok": bool,
+            "git_commit": str,
+        }
+    """
+    import pandas as pd
+
+    fixtures_dir = Path("tests/fixtures")
+    provenance_path = fixtures_dir / "_provenance.txt"
+
+    # D-07: provenance sentinel check
+    if not provenance_path.exists():
+        raise RuntimeError(
+            f"Parity fixtures missing: {provenance_path} not found. "
+            "Run T-08 fixture-capture procedure before kernel edits."
+        )
+    provenance = {}
+    for line in provenance_path.read_text().splitlines():
+        if ": " in line:
+            k, v = line.split(": ", 1)
+            provenance[k.strip()] = v.strip()
+    if provenance.get("git_dirty_files", "1") != "0":
+        raise RuntimeError(
+            f"Provenance sentinel reports dirty tree at capture time: {provenance}. "
+            "Fixtures may be contaminated — re-capture on a clean working tree."
+        )
+    git_commit = provenance.get("git_commit", "unknown")
+
+    strategies = [
+        ("all_H", all_H),
+        ("all_A", all_A),
+        ("all_T", all_T),
+        ("greedy_profit", greedy_profit),
+        ("greedy_with_switching", greedy_with_switching),
+    ]
+    parity_cols = ["t", "Y", "C", "pi", "K", "adj_cost"]
+
+    per_strategy: dict[str, dict] = {}
+    all_passed = True
+
+    for strat_name, strat in strategies:
+        fixture_path = fixtures_dir / f"phase1_baseline_{strat_name}.parquet"
+        if not fixture_path.exists():
+            per_strategy[strat_name] = {"passed": False, "error": f"fixture missing: {fixture_path}"}
+            all_passed = False
+            continue
+
+        df1 = pd.read_parquet(fixture_path)
+        params = FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0)
+        firm = make_firm(params)
+        df15 = run_simulation(firm, strat)
+
+        max_dev_per_col: dict[str, float] = {}
+        strat_passed = True
+        for col in parity_cols:
+            eq = np.array_equal(df15[col].values, df1[col].values)
+            if not eq:
+                dev = float(np.max(np.abs(df15[col].values.astype(float) - df1[col].values.astype(float))))
+                max_dev_per_col[col] = dev
+                strat_passed = False
+            else:
+                max_dev_per_col[col] = 0.0
+
+        per_strategy[strat_name] = {"passed": strat_passed, "max_dev_per_col": max_dev_per_col}
+        all_passed = all_passed and strat_passed
+
+    return all_passed, {
+        "per_strategy": per_strategy,
+        "provenance_ok": True,
+        "git_commit": git_commit,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Tier A aggregator
 # ---------------------------------------------------------------------------
 
@@ -400,12 +493,13 @@ def run_tier_a(firm_factory=None) -> dict:
         ("check3", check3_monotone_q_a),
         ("check4", check4_monotone_w),
         ("check5", check5_numeraire),
+        ("check7", check7_phase1_parity),
     ]:
         passed, details = check_fn(firm_factory)
         results[check_name] = {"passed": passed, "details": details}
 
     results["all_passed"] = all(
-        results[k]["passed"] for k in ("check1", "check3", "check4", "check5")
+        results[k]["passed"] for k in ("check1", "check3", "check4", "check5", "check7")
     )
 
     return results
