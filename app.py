@@ -252,10 +252,22 @@ def _build_sidebar() -> tuple:
             help="Review period (inf = disabled)", key="T_review",
         )
         T_review_value = math.inf if T_review_choice == "inf" else float(T_review_choice)
-        firing_threshold = st.slider(
-            "firing_threshold", -1.0, 1.0, float(FirmParams().firing_threshold), 0.05,
-            help="Firing threshold (worker skill relative to mean)", key="firing_threshold",
+        # firing_threshold_ui is in per-task-output units (comparable to q_h ≈ 1.0).
+        # The kernel's surplus is per-worker output minus per-worker wage; per-worker
+        # output ≈ q_h × tasks_per_worker, so the kernel threshold must be scaled.
+        # UI range [-1.0, 1.0] maps to kernel range [-tpw, tpw].
+        # Default 0.0: fire workers whose per-task output < per-worker wage.
+        firing_threshold_ui = st.slider(
+            "firing_threshold", -1.0, 1.0, 0.0, 0.05,
+            help=(
+                "Per-task surplus threshold. Workers fired when "
+                "(mean output / tasks_per_worker − wage) < threshold. "
+                "0 = fire negative-surplus workers; increase toward 1 to fire more."
+            ),
+            key="firing_threshold",
         )
+        # Convert UI (per-task) → kernel (per-worker) by multiplying by tasks_per_worker
+        firing_threshold_kernel = float(firing_threshold_ui) * int(tasks_per_worker)
 
     # Seed (D-02: default 0, not None)
     seed = st.sidebar.number_input(
@@ -287,7 +299,7 @@ def _build_sidebar() -> tuple:
         corr_w_theta=float(corr_w_theta),
         sigma_w=float(sigma_w),
         T_review=T_review_value,
-        firing_threshold=float(firing_threshold),
+        firing_threshold=firing_threshold_kernel,
         seed=int(seed),
     )
     key = params_to_key(draft_params, int(seed))
