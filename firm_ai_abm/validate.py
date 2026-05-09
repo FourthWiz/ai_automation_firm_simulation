@@ -61,8 +61,8 @@ SCALED_PARAMS: tuple[str, ...] = (
     "p",
 )
 
-# Non-monetary parameters: productivity scalars, counts, seed.
-# Eight params.
+# Non-monetary parameters: productivity scalars, counts, seed, heterogeneity shape.
+# Thirteen params (8 original + 5 new from Phase 1.5 Stage 1).
 UNSCALED_PARAMS: tuple[str, ...] = (
     "q_h",
     "q_a",
@@ -72,6 +72,12 @@ UNSCALED_PARAMS: tuple[str, ...] = (
     "tasks_per_worker",
     "n_amortize",
     "seed",
+    # Phase 1.5 Stage 1: worker heterogeneity shape parameters (not monetary)
+    "sigma_theta",
+    "theta_min",
+    "theta_max",
+    "corr_w_theta",
+    "sigma_w",
 )
 
 
@@ -120,7 +126,8 @@ def check1_constant_baseline(firm_factory) -> tuple[bool, dict]:
             "K_constant": bool,
         }
     """
-    params = replace(FirmParams(seed=0), q_a=0.0, g=0.0, c_aug=0.0)
+    # sigma_theta=sigma_w=0: homogeneous workers so that expected_pi formula holds exactly
+    params = replace(FirmParams(seed=0), q_a=0.0, g=0.0, c_aug=0.0, sigma_theta=0.0, sigma_w=0.0)
     firm = make_firm(params)
     df = run_simulation(firm, all_H)
 
@@ -190,7 +197,7 @@ def check3_monotone_q_a(firm_factory) -> tuple[bool, dict]:
     total_pis = []
 
     for q_a in q_a_grid:
-        params = replace(FirmParams(seed=0), q_a=float(q_a))
+        params = replace(FirmParams(seed=0), q_a=float(q_a), sigma_theta=0.0, sigma_w=0.0)
         firm = make_firm(params)
         df = run_simulation(firm, all_T)
         total_pis.append(float(df["pi"].sum()))
@@ -251,7 +258,7 @@ def check4_monotone_w(firm_factory) -> tuple[bool, dict]:
     total_pis = []
 
     for w in w_grid:
-        params = replace(FirmParams(seed=0), w=float(w))
+        params = replace(FirmParams(seed=0), w=float(w), sigma_theta=0.0, sigma_w=0.0)
         firm = make_firm(params)
         df = run_simulation(firm, all_H)
         total_pis.append(float(df["pi"].sum()))
@@ -445,7 +452,7 @@ def check2_greedy_dominance(firm_factory) -> tuple[bool, dict]:
             "tolerance_form": "weak (>=) per parent architecture tie-break risk",
         }
     """
-    params = replace(FirmParams(seed=0), c_train=0.0, c_fire=0.0, c_hire=0.0)
+    params = replace(FirmParams(seed=0), c_train=0.0, c_fire=0.0, c_hire=0.0, sigma_theta=0.0, sigma_w=0.0)
     firm = make_firm(params)
 
     # Run greedy_profit on the shared firm instance
@@ -519,8 +526,9 @@ def check6_no_switching_under_high_costs(firm_factory) -> tuple[bool, dict]:
             "joint_cost_recipe": "c_train=c_fire=c_hire=100",
         }
     """
-    # High-cost scenario: joint recipe per R-15
-    params_high = replace(FirmParams(seed=0), c_train=100.0, c_fire=100.0, c_hire=100.0)
+    # High-cost scenario: joint recipe per R-15; sigma=0 for axis isolation
+    params_high = replace(FirmParams(seed=0), c_train=100.0, c_fire=100.0, c_hire=100.0,
+                          sigma_theta=0.0, sigma_w=0.0)
     firm_high = make_firm(params_high)
     df_high = run_simulation(firm_high, greedy_with_switching)
 
@@ -531,7 +539,8 @@ def check6_no_switching_under_high_costs(firm_factory) -> tuple[bool, dict]:
     # move AWAY from the all-H initial state on at least one task at t=0.
     # NOTE: adj_cost is zero-by-construction when c_train=c_fire=c_hire=0,
     # even if modes change — so we check modes directly, not adj_cost.sum().
-    params_zero = replace(FirmParams(seed=0), c_train=0.0, c_fire=0.0, c_hire=0.0)
+    params_zero = replace(FirmParams(seed=0), c_train=0.0, c_fire=0.0, c_hire=0.0,
+                          sigma_theta=0.0, sigma_w=0.0)
     firm_zero = make_firm(params_zero)
     df_zero = run_simulation(firm_zero, greedy_with_switching)
     # The firm starts all-H (firm.reset() sets all modes to Mode.H = 0).

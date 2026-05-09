@@ -39,16 +39,21 @@ def productivity_vec(
     alpha: np.ndarray,
     beta: np.ndarray,
     params: FirmParams,
+    theta_per_task: np.ndarray | None = None,
 ) -> np.ndarray:
     """Return per-task productivity for each task, shape (N,), dtype float64.
 
-    H  -> q_h
-    A  -> q_h * (1 + g * beta_i)
-    T  -> q_a * alpha_i
+    H  -> q_h * theta_per_task_i
+    A  -> q_h * (1 + g * beta_i) * theta_per_task_i   (D-02: multiplicative)
+    T  -> q_a * alpha_i                                 (T unaffected by theta)
+
+    theta_per_task=None (default) reduces to Phase 1 behavior exactly (byte-identical).
+    theta_per_task=np.ones(N) produces identical output to None.
 
     Kernel invariants (assert, not raise — these are call-site preconditions):
       - modes must have integer dtype
       - all values must be in {0, 1, 2}
+      - theta_per_task must be float64 and same shape as modes (if provided)
     """
     assert modes.dtype.kind == "i", (
         f"modes must be integer dtype, got {modes.dtype}"
@@ -56,8 +61,16 @@ def productivity_vec(
     assert ((modes >= 0) & (modes <= 2)).all(), (
         "modes values must be in {0, 1, 2}"
     )
-    p = np.where(modes == Mode.H, params.q_h, 0.0)
-    p = np.where(modes == Mode.A, params.q_h * (1.0 + params.g * beta), p)
+    if theta_per_task is None:
+        theta_per_task = np.ones(len(modes), dtype=np.float64)
+    assert theta_per_task.shape == modes.shape, (
+        f"theta_per_task shape {theta_per_task.shape} != modes shape {modes.shape}"
+    )
+    assert theta_per_task.dtype.kind == "f", (
+        f"theta_per_task must be float dtype, got {theta_per_task.dtype}"
+    )
+    p = np.where(modes == Mode.H, params.q_h * theta_per_task, 0.0)
+    p = np.where(modes == Mode.A, params.q_h * (1.0 + params.g * beta) * theta_per_task, p)
     p = np.where(modes == Mode.T, params.q_a * alpha, p)
     return p.astype(np.float64)
 
