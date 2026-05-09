@@ -1,6 +1,5 @@
 """Firm dataclass + factory. reset() is R-07-compliant: never touches alpha/beta/workforce."""
 from dataclasses import dataclass, field
-from typing import Optional
 
 import numpy as np
 
@@ -16,7 +15,7 @@ class Firm:
     alpha: np.ndarray
     beta: np.ndarray
     modes: np.ndarray | None = None
-    workforce: Optional[Workforce] = None
+    workforce: Workforce | None = None
     history: list = field(default_factory=list)
     rng: np.random.Generator | None = None
 
