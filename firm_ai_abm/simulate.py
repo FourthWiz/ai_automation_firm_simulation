@@ -124,6 +124,7 @@ def run_simulation(firm: Firm, strategy: Callable, T: int | None = None) -> pd.D
             "wage_bill": wage_bill,       # new: sum of assigned-worker wages
             "mean_theta": float(firm.workforce.theta.mean()),  # new: workforce mean theta
             "mean_wage": float(firm.workforce.wage.mean()),    # new: workforce mean wage
+            "n_a_trained": int(firm.workforce.a_trained.sum()),  # Stage 2: trained worker count
         })
 
     df = pd.DataFrame(firm.history)
