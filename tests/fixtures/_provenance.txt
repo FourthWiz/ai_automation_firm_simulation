@@ -1,3 +1,5 @@
-git_commit: 7be60379f363fe55560b9805faaa1e799d2cc6a3
+git_commit: 828db3842855909c912caf12ca06bd811be1cb9b
 git_dirty_files: 0
-capture_time: 2026-05-09T04:46:41.446184+00:00
+capture_time: 2026-05-09T06:06:35.671210+00:00
+stage: 2 (training-memory) — fixtures re-captured after per-worker adj_cost change
+note: Stage 2 adj_cost uses per-worker c_train (not per-task); all_A adj_cost=1.0 (10 workers x 0.1) vs Stage 1 all_A adj_cost=10.0 (100 tasks x 0.1)
