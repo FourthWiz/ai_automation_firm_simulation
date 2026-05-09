@@ -8,6 +8,7 @@ from firm_ai_abm.strategy import (
 )
 from firm_ai_abm.simulate import run_simulation
 from firm_ai_abm.workers import Workforce, sample_workforce, task_to_worker_map, _make_initial_workforce
+from firm_ai_abm.review import firing_review, apply_firings_and_replace
 from firm_ai_abm.viz import fig1_primary_lines, fig2_small_multiples_q_a, fig3_mode_mix_greedy
 
 __all__ = [
@@ -30,6 +31,9 @@ __all__ = [
     "sample_workforce",
     "task_to_worker_map",
     "_make_initial_workforce",
+    # Phase 1.5 Stage 3: periodic firing review
+    "firing_review",
+    "apply_firings_and_replace",
     # Visualization
     "fig1_primary_lines",
     "fig2_small_multiples_q_a",

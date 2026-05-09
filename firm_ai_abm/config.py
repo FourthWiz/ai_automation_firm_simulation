@@ -1,4 +1,5 @@
 """Phase 1 firm parameters. Defaults from 01_phase1_single_firm.md §7."""
+import math
 from dataclasses import dataclass
 
 
@@ -38,3 +39,13 @@ class FirmParams:
     theta_max: float = 1.6       # upper clip for theta
     corr_w_theta: float = 0.7    # elasticity exponent in wage = w * theta**corr_w_theta * exp(eps); NOT a Pearson r
     sigma_w: float = 0.05        # multiplicative log-noise std on individual wage
+
+    # Phase 1.5 Stage 3 — periodic firing review
+    T_review: float = math.inf   # review every T_review periods; math.inf (default) disables the path
+                                  # entirely — set to e.g. 10.0 to enable.
+                                  # FLOAT-typed to support math.inf (disabled path). int(T_review) is
+                                  # used internally for modulo arithmetic. Default math.inf means the
+                                  # periodic firing review is disabled by default — opt in by setting
+                                  # T_review=10.0 (or any finite value).
+    firing_threshold: float = 0.0  # fire workers with surplus < firing_threshold
+                                    # (defaults to 0.0 = fire negative-surplus workers)
