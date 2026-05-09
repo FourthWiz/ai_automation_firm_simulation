@@ -32,14 +32,17 @@ flat segment at boundary grid points. The phase-doc wording "monotonically
 increases" is interpreted as weakly monotone per stage-three plan §Decisions.
 """
 
+import os
+import subprocess
 from dataclasses import fields, replace
+from pathlib import Path
 
 import numpy as np
 
 from firm_ai_abm.config import FirmParams
 from firm_ai_abm.firm import make_firm
 from firm_ai_abm.simulate import run_simulation
-from firm_ai_abm.strategy import all_A, all_H, all_T
+from firm_ai_abm.strategy import all_A, all_H, all_T, greedy_profit, greedy_with_switching
 
 # ---------------------------------------------------------------------------
 # Module-level constants
@@ -61,8 +64,8 @@ SCALED_PARAMS: tuple[str, ...] = (
     "p",
 )
 
-# Non-monetary parameters: productivity scalars, counts, seed.
-# Eight params.
+# Non-monetary parameters: productivity scalars, counts, seed, heterogeneity shape.
+# Thirteen params (8 original + 5 new from Phase 1.5 Stage 1).
 UNSCALED_PARAMS: tuple[str, ...] = (
     "q_h",
     "q_a",
@@ -72,6 +75,12 @@ UNSCALED_PARAMS: tuple[str, ...] = (
     "tasks_per_worker",
     "n_amortize",
     "seed",
+    # Phase 1.5 Stage 1: worker heterogeneity shape parameters (not monetary)
+    "sigma_theta",
+    "theta_min",
+    "theta_max",
+    "corr_w_theta",
+    "sigma_w",
 )
 
 
@@ -120,7 +129,8 @@ def check1_constant_baseline(firm_factory) -> tuple[bool, dict]:
             "K_constant": bool,
         }
     """
-    params = replace(FirmParams(seed=0), q_a=0.0, g=0.0, c_aug=0.0)
+    # sigma_theta=sigma_w=0: homogeneous workers so that expected_pi formula holds exactly
+    params = replace(FirmParams(seed=0), q_a=0.0, g=0.0, c_aug=0.0, sigma_theta=0.0, sigma_w=0.0)
     firm = make_firm(params)
     df = run_simulation(firm, all_H)
 
@@ -190,7 +200,7 @@ def check3_monotone_q_a(firm_factory) -> tuple[bool, dict]:
     total_pis = []
 
     for q_a in q_a_grid:
-        params = replace(FirmParams(seed=0), q_a=float(q_a))
+        params = replace(FirmParams(seed=0), q_a=float(q_a), sigma_theta=0.0, sigma_w=0.0)
         firm = make_firm(params)
         df = run_simulation(firm, all_T)
         total_pis.append(float(df["pi"].sum()))
@@ -251,7 +261,7 @@ def check4_monotone_w(firm_factory) -> tuple[bool, dict]:
     total_pis = []
 
     for w in w_grid:
-        params = replace(FirmParams(seed=0), w=float(w))
+        params = replace(FirmParams(seed=0), w=float(w), sigma_theta=0.0, sigma_w=0.0)
         firm = make_firm(params)
         df = run_simulation(firm, all_H)
         total_pis.append(float(df["pi"].sum()))
@@ -357,6 +367,96 @@ def check5_numeraire(firm_factory) -> tuple[bool, dict]:
 
 
 # ---------------------------------------------------------------------------
+# Check 7: Phase 1 degenerate parity (Tier A — Phase 1.5 Stage 1)
+# ---------------------------------------------------------------------------
+
+
+def check7_phase1_parity(firm_factory) -> tuple[bool, dict]:
+    """Check 7: With sigma_theta=sigma_w=0, Phase 1.5 history is byte-identical to Phase 1.
+
+    Reads parquet fixtures from tests/fixtures/ (captured before kernel edits,
+    see D-07 provenance sentinel). Verifies columns t, Y, C, pi, K, adj_cost
+    are np.array_equal to the Phase 1 baseline for all 5 strategies.
+
+    D-07 provenance sentinel: reads tests/fixtures/_provenance.txt and raises
+    RuntimeError if git_dirty_files != 0 or the file is absent.
+
+    Returns:
+        (passed, details) where details = {
+            "per_strategy": {<name>: {"passed": bool, "max_dev_per_col": dict}},
+            "provenance_ok": bool,
+            "git_commit": str,
+        }
+    """
+    import pandas as pd
+
+    fixtures_dir = Path("tests/fixtures")
+    provenance_path = fixtures_dir / "_provenance.txt"
+
+    # D-07: provenance sentinel check
+    if not provenance_path.exists():
+        raise RuntimeError(
+            f"Parity fixtures missing: {provenance_path} not found. "
+            "Run T-08 fixture-capture procedure before kernel edits."
+        )
+    provenance = {}
+    for line in provenance_path.read_text().splitlines():
+        if ": " in line:
+            k, v = line.split(": ", 1)
+            provenance[k.strip()] = v.strip()
+    if provenance.get("git_dirty_files", "1") != "0":
+        raise RuntimeError(
+            f"Provenance sentinel reports dirty tree at capture time: {provenance}. "
+            "Fixtures may be contaminated — re-capture on a clean working tree."
+        )
+    git_commit = provenance.get("git_commit", "unknown")
+
+    strategies = [
+        ("all_H", all_H),
+        ("all_A", all_A),
+        ("all_T", all_T),
+        ("greedy_profit", greedy_profit),
+        ("greedy_with_switching", greedy_with_switching),
+    ]
+    parity_cols = ["t", "Y", "C", "pi", "K", "adj_cost"]
+
+    per_strategy: dict[str, dict] = {}
+    all_passed = True
+
+    for strat_name, strat in strategies:
+        fixture_path = fixtures_dir / f"phase1_baseline_{strat_name}.parquet"
+        if not fixture_path.exists():
+            per_strategy[strat_name] = {"passed": False, "error": f"fixture missing: {fixture_path}"}
+            all_passed = False
+            continue
+
+        df1 = pd.read_parquet(fixture_path)
+        params = FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0)
+        firm = make_firm(params)
+        df15 = run_simulation(firm, strat)
+
+        max_dev_per_col: dict[str, float] = {}
+        strat_passed = True
+        for col in parity_cols:
+            eq = np.array_equal(df15[col].values, df1[col].values)
+            if not eq:
+                dev = float(np.max(np.abs(df15[col].values.astype(float) - df1[col].values.astype(float))))
+                max_dev_per_col[col] = dev
+                strat_passed = False
+            else:
+                max_dev_per_col[col] = 0.0
+
+        per_strategy[strat_name] = {"passed": strat_passed, "max_dev_per_col": max_dev_per_col}
+        all_passed = all_passed and strat_passed
+
+    return all_passed, {
+        "per_strategy": per_strategy,
+        "provenance_ok": True,
+        "git_commit": git_commit,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Tier A aggregator
 # ---------------------------------------------------------------------------
 
@@ -393,12 +493,235 @@ def run_tier_a(firm_factory=None) -> dict:
         ("check3", check3_monotone_q_a),
         ("check4", check4_monotone_w),
         ("check5", check5_numeraire),
+        ("check7", check7_phase1_parity),
     ]:
         passed, details = check_fn(firm_factory)
         results[check_name] = {"passed": passed, "details": details}
 
     results["all_passed"] = all(
-        results[k]["passed"] for k in ("check1", "check3", "check4", "check5")
+        results[k]["passed"] for k in ("check1", "check3", "check4", "check5", "check7")
     )
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# Check 2: greedy dominance (Tier B)
+# ---------------------------------------------------------------------------
+
+
+def check2_greedy_dominance(firm_factory) -> tuple[bool, dict]:
+    """Check 2: greedy_profit cumulative profit >= each baseline with zero switching costs.
+
+    With all switching costs zero (c_train=c_fire=c_hire=0), greedy_profit must
+    achieve cumulative profit >= each of {all_H, all_A, all_T, greedy_with_switching}
+    at every period, using weak >= with atol=ATOL=1e-9.
+
+    Rationale for weak inequality (parent architecture tie-break risk):
+    When q_a * alpha_i == q_h for some tasks, greedy_profit and other strategies
+    may produce identical per-task scores, leading to identical cumulative profits.
+    The np.argmax first-index-wins tie-break (H < A < T) means greedy_profit and
+    greedy_with_switching (which is identical to greedy_profit when all switching
+    costs are zero) may choose the same modes, producing exactly equal cumulative
+    profits. Strict > would produce false failures on these knife-edge configurations.
+
+    Single-firm-instance constraint (parent architecture shared-firm-instance risk):
+    All strategies run on the SAME firm instance (same alpha/beta arrays) via
+    run_simulation, which calls firm.reset() before each run and preserves alpha/beta.
+    This ensures greedy_profit's advantage is measured on an identical task landscape,
+    not a different random draw.
+
+    Note: firm_factory parameter is reserved for Phase-3 sweep reuse; check builds
+    its own params for axis isolation (mirrors check1/check3/check4/check5 contract).
+
+    Returns:
+        (passed, details) where details = {
+            "per_baseline": {
+                "all_H": {"min_gap": float, "passed": bool},
+                "all_A": {"min_gap": float, "passed": bool},
+                "all_T": {"min_gap": float, "passed": bool},
+                "greedy_with_switching": {"min_gap": float, "passed": bool},
+            },
+            "atol_used": 1e-9,
+            "tolerance_form": "weak (>=) per parent architecture tie-break risk",
+        }
+    """
+    params = replace(FirmParams(seed=0), c_train=0.0, c_fire=0.0, c_hire=0.0, sigma_theta=0.0, sigma_w=0.0)
+    firm = make_firm(params)
+
+    # Run greedy_profit on the shared firm instance
+    df_g = run_simulation(firm, greedy_profit)
+    cum_g = df_g["pi"].cumsum().values
+
+    baselines = [
+        ("all_H", all_H),
+        ("all_A", all_A),
+        ("all_T", all_T),
+        ("greedy_with_switching", greedy_with_switching),
+    ]
+
+    per_baseline: dict[str, dict] = {}
+    all_passed = True
+
+    for name, strategy in baselines:
+        # run_simulation calls firm.reset() — alpha/beta preserved (R-07)
+        df_s = run_simulation(firm, strategy)
+        cum_s = df_s["pi"].cumsum().values
+        gap = cum_g - cum_s
+        s_passed = bool((gap >= -ATOL).all())
+        per_baseline[name] = {
+            "min_gap": float(gap.min()),
+            "passed": s_passed,
+        }
+        all_passed = all_passed and s_passed
+
+    return all_passed, {
+        "per_baseline": per_baseline,
+        "atol_used": ATOL,
+        "tolerance_form": "weak (>=) per parent architecture tie-break risk",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Check 6: no switching under high adjustment costs (Tier B)
+# ---------------------------------------------------------------------------
+
+
+def check6_no_switching_under_high_costs(firm_factory) -> tuple[bool, dict]:
+    """Check 6: greedy_with_switching stays all-H when c_train=c_fire=c_hire=100.
+
+    Joint switching cost recipe (parent architecture joint-cost-recipe risk, R-15):
+    Only setting c_train=100 blocks H->A but NOT H->T or A->T under the smooth
+    amortized greedy decision rule (parent architecture smooth-vs-lumpy risk, R-14).
+    The smooth per-task amortization for H->T is c_fire/tasks_per_worker/n_amortize
+    = 2/10/6 ≈ 0.033 — small relative to plausible per-task gains. Setting ALL three
+    (c_train=c_fire=c_hire=100) drives every per-task switching cost well above any
+    plausible per-task gain, making "no switching" deterministic.
+
+    Verification:
+    - Primary: adj_cost == 0 every period (load-bearing; reads simulate.py's
+      adj_cost column — D-01 from current plan ensures this column exists).
+    - Secondary: all modes stay at Mode.H (firm initialises all-H via firm.reset()).
+
+    Differential sanity (parent architecture adj-cost-timing risk, R-03):
+    Also run the SAME scenario with c_train=c_fire=c_hire=0 and assert that
+    greedy_with_switching DOES switch (adj_cost.sum() > 0). This pins the check
+    in both directions: "stays put under high costs" and "does switch when free",
+    preventing a vacuously-passing check from a broken greedy that always picks H.
+
+    Note: firm_factory parameter is reserved for Phase-3 sweep reuse; check builds
+    its own params for axis isolation.
+
+    Returns:
+        (passed, details) where details = {
+            "max_adj_cost": float,
+            "no_switching_under_high_costs": bool,
+            "differential_switches_under_zero_costs": bool,
+            "joint_cost_recipe": "c_train=c_fire=c_hire=100",
+        }
+    """
+    # High-cost scenario: joint recipe per R-15; sigma=0 for axis isolation
+    params_high = replace(FirmParams(seed=0), c_train=100.0, c_fire=100.0, c_hire=100.0,
+                          sigma_theta=0.0, sigma_w=0.0)
+    firm_high = make_firm(params_high)
+    df_high = run_simulation(firm_high, greedy_with_switching)
+
+    max_adj_cost = float(np.abs(df_high["adj_cost"].values).max())
+    no_switching = bool(np.allclose(df_high["adj_cost"].values, 0.0, atol=ATOL))
+
+    # Differential sanity: with zero switching costs, greedy_with_switching must
+    # move AWAY from the all-H initial state on at least one task at t=0.
+    # NOTE: adj_cost is zero-by-construction when c_train=c_fire=c_hire=0,
+    # even if modes change — so we check modes directly, not adj_cost.sum().
+    params_zero = replace(FirmParams(seed=0), c_train=0.0, c_fire=0.0, c_hire=0.0,
+                          sigma_theta=0.0, sigma_w=0.0)
+    firm_zero = make_firm(params_zero)
+    df_zero = run_simulation(firm_zero, greedy_with_switching)
+    # The firm starts all-H (firm.reset() sets all modes to Mode.H = 0).
+    # At t=0, greedy_with_switching (with zero switching costs) is identical
+    # to greedy_profit and picks the globally optimal mode per task, typically
+    # moving many tasks to A or T. If even one task moves non-H, this fires.
+    modes_t0_zero = df_zero["modes"].iloc[0]
+    differential_switches = bool((modes_t0_zero != 0).any())
+
+    passed = no_switching and differential_switches
+
+    return passed, {
+        "max_adj_cost": max_adj_cost,
+        "no_switching_under_high_costs": no_switching,
+        "differential_switches_under_zero_costs": differential_switches,
+        "joint_cost_recipe": "c_train=c_fire=c_hire=100",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tier B aggregator
+# ---------------------------------------------------------------------------
+
+
+def run_tier_b(firm_factory=None) -> dict:
+    """Run all Tier B greedy-strategy checks and return a combined results dict.
+
+    Tier B checks: check2 (greedy dominance over baselines with zero switching
+    costs) and check6 (no switching under joint high costs). These checks require
+    the greedy strategies and adjustment-cost code from Stage 4.
+
+    Args:
+        firm_factory: Callable returning a Firm, or None. If None, uses
+            firm_factory_default. Reserved for Phase-3 sweep reuse; individual
+            checks build their own params for axis isolation.
+
+    Returns:
+        dict with keys: "check2", "check6", "all_passed".
+        Each check value is {"passed": bool, "details": dict}.
+        Does NOT raise on failure — returns the dict for full reporting.
+    """
+    if firm_factory is None:
+        firm_factory = firm_factory_default
+
+    results: dict = {}
+
+    for check_name, check_fn in [
+        ("check2", check2_greedy_dominance),
+        ("check6", check6_no_switching_under_high_costs),
+    ]:
+        passed, details = check_fn(firm_factory)
+        results[check_name] = {"passed": passed, "details": details}
+
+    results["all_passed"] = all(
+        results[k]["passed"] for k in ("check2", "check6")
+    )
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Full-suite aggregator (all six checks)
+# ---------------------------------------------------------------------------
+
+
+def run_all_checks(firm_factory=None) -> dict:
+    """Run all six validation checks (Tier A + Tier B) and return a combined dict.
+
+    This is the single function the gate reviewer runs to validate Phase 1.
+    Covers: check1 (constant baseline), check2 (greedy dominance), check3
+    (monotonicity q_a), check4 (monotonicity w), check5 (numeraire invariance),
+    check6 (no switching under high costs).
+
+    Args:
+        firm_factory: Callable returning a Firm, or None. Passed through to
+            run_tier_a and run_tier_b; individual checks override params for
+            axis isolation.
+
+    Returns:
+        dict with keys: "tier_a", "tier_b", "all_passed".
+        "tier_a" and "tier_b" are the dicts returned by run_tier_a/run_tier_b.
+        "all_passed" is True iff both tier_a["all_passed"] and tier_b["all_passed"].
+    """
+    tier_a = run_tier_a(firm_factory)
+    tier_b = run_tier_b(firm_factory)
+    return {
+        "tier_a": tier_a,
+        "tier_b": tier_b,
+        "all_passed": tier_a["all_passed"] and tier_b["all_passed"],
+    }
