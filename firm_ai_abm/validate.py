@@ -65,7 +65,7 @@ SCALED_PARAMS: tuple[str, ...] = (
 )
 
 # Non-monetary parameters: productivity scalars, counts, seed, heterogeneity shape.
-# Thirteen params (8 original + 5 new from Phase 1.5 Stage 1).
+# Fifteen params (8 original + 5 from Phase 1.5 Stage 1 + 2 from Phase 1.5 Stage 3).
 UNSCALED_PARAMS: tuple[str, ...] = (
     "q_h",
     "q_a",
@@ -81,6 +81,13 @@ UNSCALED_PARAMS: tuple[str, ...] = (
     "theta_max",
     "corr_w_theta",
     "sigma_w",
+    # Phase 1.5 Stage 3: periodic firing review shape parameters (not monetary)
+    # T_review: period count (unscaled); firing_threshold: wage-relative at default 0.0
+    # (0.0 is numeraire-invariant: 0.0 * k = 0.0 regardless of scaling factor).
+    # KNOWN LIMITATION: non-zero firing_threshold would be monetary and should be in
+    # SCALED_PARAMS; Stage 3 defers this — only the default 0.0 is safe as UNSCALED.
+    "T_review",
+    "firing_threshold",
 )
 
 
@@ -457,16 +464,123 @@ def check7_phase1_parity(firm_factory) -> tuple[bool, dict]:
 
 
 # ---------------------------------------------------------------------------
+# Check 8: Stage 3 neutrality — T_review=inf produces byte-identical output
+# to Stage 2 fixtures (Tier A — Phase 1.5 Stage 3)
+# ---------------------------------------------------------------------------
+
+
+def check8_stage3_neutrality(firm_factory) -> tuple[bool, dict]:
+    """Check 8: Stage 3 with T_review=math.inf is byte-identical to Stage 2 fixtures.
+
+    The periodic firing review path is dormant when T_review=math.inf (D-11 default).
+    This check verifies that Stage 3 code with the dormant path produces the SAME
+    output as the Stage 2 fixtures — confirming the firing-review wire-in introduced
+    no numerical drift.
+
+    D-07 revision: re-capturing fixtures at Stage 3 tip would test a tautology.
+    The same Stage 2 parquet files (captured at 828db38) serve as the parity baseline.
+
+    D-11: since default T_review=math.inf, NO axis-isolation overrides are needed in
+    any other check. This check may still pass T_review=math.inf explicitly for
+    documentation intent (it is redundant with the default).
+
+    Procedure: mirrors check7_phase1_parity.
+      - params = FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0)
+        (default T_review=math.inf — firing review dormant)
+      - Run all 5 strategies; assert np.array_equal on parity_cols vs Stage 2 fixtures.
+
+    Returns:
+        (passed, details) where details = {
+            "per_strategy": {<name>: {"passed": bool, "max_dev_per_col": dict}},
+            "provenance_ok": bool,
+            "git_commit": str,
+        }
+    """
+    import math as _math
+
+    import pandas as pd
+
+    fixtures_dir = Path("tests/fixtures")
+    provenance_path = fixtures_dir / "_provenance.txt"
+
+    # D-07: provenance sentinel check (same as check7)
+    if not provenance_path.exists():
+        raise RuntimeError(
+            f"Parity fixtures missing: {provenance_path} not found. "
+            "Run T-08 fixture-capture procedure before kernel edits."
+        )
+    provenance = {}
+    for line in provenance_path.read_text().splitlines():
+        if ": " in line:
+            k, v = line.split(": ", 1)
+            provenance[k.strip()] = v.strip()
+    if provenance.get("git_dirty_files", "1") != "0":
+        raise RuntimeError(
+            f"Provenance sentinel reports dirty tree at capture time: {provenance}. "
+            "Fixtures may be contaminated — re-capture on a clean working tree."
+        )
+    git_commit = provenance.get("git_commit", "unknown")
+
+    strategies = [
+        ("all_H", all_H),
+        ("all_A", all_A),
+        ("all_T", all_T),
+        ("greedy_profit", greedy_profit),
+        ("greedy_with_switching", greedy_with_switching),
+    ]
+    parity_cols = ["t", "Y", "C", "pi", "K", "adj_cost"]
+
+    per_strategy: dict[str, dict] = {}
+    all_passed = True
+
+    for strat_name, strat in strategies:
+        fixture_path = fixtures_dir / f"phase1_baseline_{strat_name}.parquet"
+        if not fixture_path.exists():
+            per_strategy[strat_name] = {"passed": False, "error": f"fixture missing: {fixture_path}"}
+            all_passed = False
+            continue
+
+        df_fixture = pd.read_parquet(fixture_path)
+        # D-11: T_review=math.inf is the default — explicit here for documentation intent
+        params = FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0, T_review=_math.inf)
+        firm = make_firm(params)
+        df_s3 = run_simulation(firm, strat)
+
+        max_dev_per_col: dict[str, float] = {}
+        strat_passed = True
+        for col in parity_cols:
+            eq = np.array_equal(df_s3[col].values, df_fixture[col].values)
+            if not eq:
+                dev = float(np.max(np.abs(
+                    df_s3[col].values.astype(float) - df_fixture[col].values.astype(float)
+                )))
+                max_dev_per_col[col] = dev
+                strat_passed = False
+            else:
+                max_dev_per_col[col] = 0.0
+
+        per_strategy[strat_name] = {"passed": strat_passed, "max_dev_per_col": max_dev_per_col}
+        all_passed = all_passed and strat_passed
+
+    return all_passed, {
+        "per_strategy": per_strategy,
+        "provenance_ok": True,
+        "git_commit": git_commit,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Tier A aggregator
 # ---------------------------------------------------------------------------
 
 
 def run_tier_a(firm_factory=None) -> dict:
-    """Run all four Tier A kernel checks and return a combined results dict.
+    """Run all Tier A kernel checks and return a combined results dict.
 
     Tier A checks: check1 (constant baseline), check3 (monotonicity in q_a),
-    check4 (monotonicity in w), check5 (numeraire invariance). Checks 2 and 6
-    (greedy dominance and adjustment-cost integration) are Tier B.
+    check4 (monotonicity in w), check5 (numeraire invariance), check7 (Phase 1
+    degenerate parity), check8 (Stage 3 T_review=inf neutrality).
+    Checks 2 and 6 (greedy dominance and adjustment-cost integration) are Tier B.
 
     Args:
         firm_factory: Callable returning a Firm, or None. If None, uses
@@ -475,8 +589,8 @@ def run_tier_a(firm_factory=None) -> dict:
             override specific params via dataclasses.replace for axis isolation.
 
     Returns:
-        dict with keys: "check1", "check3", "check4", "check5", "all_passed".
-        Each check value is {"passed": bool, "details": dict}.
+        dict with keys: "check1", "check3", "check4", "check5", "check7", "check8",
+        "all_passed". Each check value is {"passed": bool, "details": dict}.
         Does NOT raise on failure — returns the dict so the driver can render a
         full report showing which checks failed and why.
 
@@ -494,12 +608,13 @@ def run_tier_a(firm_factory=None) -> dict:
         ("check4", check4_monotone_w),
         ("check5", check5_numeraire),
         ("check7", check7_phase1_parity),
+        ("check8", check8_stage3_neutrality),
     ]:
         passed, details = check_fn(firm_factory)
         results[check_name] = {"passed": passed, "details": details}
 
     results["all_passed"] = all(
-        results[k]["passed"] for k in ("check1", "check3", "check4", "check5", "check7")
+        results[k]["passed"] for k in ("check1", "check3", "check4", "check5", "check7", "check8")
     )
 
     return results
