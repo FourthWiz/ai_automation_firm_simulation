@@ -25,9 +25,9 @@ Cost model contract (architecture D-02, R-03):
     modes. They use smooth c_train amortization (c_train/n_amortize per task). This
     decision-vs-payment asymmetry is conservative (greedy over-estimates switching
     cost) and consistent with Stage 1 D-04.
-  - Stage 3 hook: prev_workforce parameter is reserved for detecting "trained workers
-    fired this period → capital lost" (c_train_lost history column). Stage 2 body
-    ignores prev_workforce; Stage 3 body will use it.
+  - Stage 3 hook: Stage 3 chose to compute `c_train_lost` in `review.py` rather than
+    in `adj_cost`. `prev_workforce` remains as a forward-compat hook for future stages
+    but is unused as of Stage 3. See D-10 in the Stage 3 plan for rationale.
 """
 from __future__ import annotations
 
@@ -110,8 +110,9 @@ def adj_cost(
                    charged per worker entering A for the first time (per-worker
                    semantics, gated by workforce.a_trained). When None, falls back
                    to Phase 1 per-task H→A counting (D-04 backward compat).
-        prev_workforce: Reserved for Stage 3 (firing wastes trained capital).
-                        Ignored in Stage 2 body. Defaults to None.
+        prev_workforce: Reserved for future stages. Stage 3 chose to compute
+                        `c_train_lost` in `review.py` instead of here (D-10).
+                        Ignored in Stage 2 and Stage 3 bodies. Defaults to None.
 
     Returns:
         Total adjustment cost as a Python float (not np.float64). Returns 0.0
