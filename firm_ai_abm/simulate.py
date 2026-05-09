@@ -194,12 +194,18 @@ def run_simulation(firm: Firm, strategy: Callable, T: int | None = None) -> pd.D
         pi = firm.params.p * Y - C
 
         # Step 11: append audit row
+        # K_active: unique workers with at least one H/A task this period.
+        # Differs from K_modes when H/A tasks are scattered across task slots
+        # (e.g. large N) — K_modes uses the packed-ceiling formula which
+        # underestimates actual paying headcount in that case.
+        K_active = int(active.size)
         firm.history.append({
             "t": t,
             "Y": Y,
             "C": C,
             "pi": pi,
-            "K": int(K_modes),           # mode-derived headcount (NOT workforce.K)
+            "K": int(K_modes),           # packed-formula headcount: ceil(n_H_or_A / tpw)
+            "K_active": K_active,         # actual unique workers assigned to H/A tasks
             "modes": firm.modes.copy(),
             "adj_cost": period_adj,
             "wage_bill": wage_bill,       # new: sum of assigned-worker wages
