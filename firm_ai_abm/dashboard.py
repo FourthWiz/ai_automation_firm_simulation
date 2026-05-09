@@ -219,6 +219,9 @@ def fig_firing_events(df: pd.DataFrame) -> matplotlib.figure.Figure:
                 transform=ax.transAxes, ha="center", va="center",
                 fontsize=9, color="gray")
 
+    # Always set x-axis to the full simulation range, not matplotlib's [0,1] default
+    t_max = int(df["t"].max()) if len(df) > 0 else 1
+    ax.set_xlim(-0.5, t_max + 0.5)
     ax.set_xlabel("period")
     ax.set_ylabel("workers fired")
     ax.set_title("Firing Events at Review Periods")
