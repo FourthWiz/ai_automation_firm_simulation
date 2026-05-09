@@ -39,7 +39,7 @@ import numpy as np
 from firm_ai_abm.config import FirmParams
 from firm_ai_abm.firm import make_firm
 from firm_ai_abm.simulate import run_simulation
-from firm_ai_abm.strategy import all_A, all_H, all_T
+from firm_ai_abm.strategy import all_A, all_H, all_T, greedy_profit, greedy_with_switching
 
 # ---------------------------------------------------------------------------
 # Module-level constants
@@ -402,3 +402,223 @@ def run_tier_a(firm_factory=None) -> dict:
     )
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# Check 2: greedy dominance (Tier B)
+# ---------------------------------------------------------------------------
+
+
+def check2_greedy_dominance(firm_factory) -> tuple[bool, dict]:
+    """Check 2: greedy_profit cumulative profit >= each baseline with zero switching costs.
+
+    With all switching costs zero (c_train=c_fire=c_hire=0), greedy_profit must
+    achieve cumulative profit >= each of {all_H, all_A, all_T, greedy_with_switching}
+    at every period, using weak >= with atol=ATOL=1e-9.
+
+    Rationale for weak inequality (parent architecture tie-break risk):
+    When q_a * alpha_i == q_h for some tasks, greedy_profit and other strategies
+    may produce identical per-task scores, leading to identical cumulative profits.
+    The np.argmax first-index-wins tie-break (H < A < T) means greedy_profit and
+    greedy_with_switching (which is identical to greedy_profit when all switching
+    costs are zero) may choose the same modes, producing exactly equal cumulative
+    profits. Strict > would produce false failures on these knife-edge configurations.
+
+    Single-firm-instance constraint (parent architecture shared-firm-instance risk):
+    All strategies run on the SAME firm instance (same alpha/beta arrays) via
+    run_simulation, which calls firm.reset() before each run and preserves alpha/beta.
+    This ensures greedy_profit's advantage is measured on an identical task landscape,
+    not a different random draw.
+
+    Note: firm_factory parameter is reserved for Phase-3 sweep reuse; check builds
+    its own params for axis isolation (mirrors check1/check3/check4/check5 contract).
+
+    Returns:
+        (passed, details) where details = {
+            "per_baseline": {
+                "all_H": {"min_gap": float, "passed": bool},
+                "all_A": {"min_gap": float, "passed": bool},
+                "all_T": {"min_gap": float, "passed": bool},
+                "greedy_with_switching": {"min_gap": float, "passed": bool},
+            },
+            "atol_used": 1e-9,
+            "tolerance_form": "weak (>=) per parent architecture tie-break risk",
+        }
+    """
+    params = replace(FirmParams(seed=0), c_train=0.0, c_fire=0.0, c_hire=0.0)
+    firm = make_firm(params)
+
+    # Run greedy_profit on the shared firm instance
+    df_g = run_simulation(firm, greedy_profit)
+    cum_g = df_g["pi"].cumsum().values
+
+    baselines = [
+        ("all_H", all_H),
+        ("all_A", all_A),
+        ("all_T", all_T),
+        ("greedy_with_switching", greedy_with_switching),
+    ]
+
+    per_baseline: dict[str, dict] = {}
+    all_passed = True
+
+    for name, strategy in baselines:
+        # run_simulation calls firm.reset() — alpha/beta preserved (R-07)
+        df_s = run_simulation(firm, strategy)
+        cum_s = df_s["pi"].cumsum().values
+        gap = cum_g - cum_s
+        s_passed = bool((gap >= -ATOL).all())
+        per_baseline[name] = {
+            "min_gap": float(gap.min()),
+            "passed": s_passed,
+        }
+        all_passed = all_passed and s_passed
+
+    return all_passed, {
+        "per_baseline": per_baseline,
+        "atol_used": ATOL,
+        "tolerance_form": "weak (>=) per parent architecture tie-break risk",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Check 6: no switching under high adjustment costs (Tier B)
+# ---------------------------------------------------------------------------
+
+
+def check6_no_switching_under_high_costs(firm_factory) -> tuple[bool, dict]:
+    """Check 6: greedy_with_switching stays all-H when c_train=c_fire=c_hire=100.
+
+    Joint switching cost recipe (parent architecture joint-cost-recipe risk, R-15):
+    Only setting c_train=100 blocks H->A but NOT H->T or A->T under the smooth
+    amortized greedy decision rule (parent architecture smooth-vs-lumpy risk, R-14).
+    The smooth per-task amortization for H->T is c_fire/tasks_per_worker/n_amortize
+    = 2/10/6 ≈ 0.033 — small relative to plausible per-task gains. Setting ALL three
+    (c_train=c_fire=c_hire=100) drives every per-task switching cost well above any
+    plausible per-task gain, making "no switching" deterministic.
+
+    Verification:
+    - Primary: adj_cost == 0 every period (load-bearing; reads simulate.py's
+      adj_cost column — D-01 from current plan ensures this column exists).
+    - Secondary: all modes stay at Mode.H (firm initialises all-H via firm.reset()).
+
+    Differential sanity (parent architecture adj-cost-timing risk, R-03):
+    Also run the SAME scenario with c_train=c_fire=c_hire=0 and assert that
+    greedy_with_switching DOES switch (adj_cost.sum() > 0). This pins the check
+    in both directions: "stays put under high costs" and "does switch when free",
+    preventing a vacuously-passing check from a broken greedy that always picks H.
+
+    Note: firm_factory parameter is reserved for Phase-3 sweep reuse; check builds
+    its own params for axis isolation.
+
+    Returns:
+        (passed, details) where details = {
+            "max_adj_cost": float,
+            "no_switching_under_high_costs": bool,
+            "differential_switches_under_zero_costs": bool,
+            "joint_cost_recipe": "c_train=c_fire=c_hire=100",
+        }
+    """
+    # High-cost scenario: joint recipe per R-15
+    params_high = replace(FirmParams(seed=0), c_train=100.0, c_fire=100.0, c_hire=100.0)
+    firm_high = make_firm(params_high)
+    df_high = run_simulation(firm_high, greedy_with_switching)
+
+    max_adj_cost = float(np.abs(df_high["adj_cost"].values).max())
+    no_switching = bool(np.allclose(df_high["adj_cost"].values, 0.0, atol=ATOL))
+
+    # Differential sanity: with zero switching costs, greedy_with_switching must
+    # move AWAY from the all-H initial state on at least one task at t=0.
+    # NOTE: adj_cost is zero-by-construction when c_train=c_fire=c_hire=0,
+    # even if modes change — so we check modes directly, not adj_cost.sum().
+    params_zero = replace(FirmParams(seed=0), c_train=0.0, c_fire=0.0, c_hire=0.0)
+    firm_zero = make_firm(params_zero)
+    df_zero = run_simulation(firm_zero, greedy_with_switching)
+    # The firm starts all-H (firm.reset() sets all modes to Mode.H = 0).
+    # At t=0, greedy_with_switching (with zero switching costs) is identical
+    # to greedy_profit and picks the globally optimal mode per task, typically
+    # moving many tasks to A or T. If even one task moves non-H, this fires.
+    modes_t0_zero = df_zero["modes"].iloc[0]
+    differential_switches = bool((modes_t0_zero != 0).any())
+
+    passed = no_switching and differential_switches
+
+    return passed, {
+        "max_adj_cost": max_adj_cost,
+        "no_switching_under_high_costs": no_switching,
+        "differential_switches_under_zero_costs": differential_switches,
+        "joint_cost_recipe": "c_train=c_fire=c_hire=100",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tier B aggregator
+# ---------------------------------------------------------------------------
+
+
+def run_tier_b(firm_factory=None) -> dict:
+    """Run all Tier B greedy-strategy checks and return a combined results dict.
+
+    Tier B checks: check2 (greedy dominance over baselines with zero switching
+    costs) and check6 (no switching under joint high costs). These checks require
+    the greedy strategies and adjustment-cost code from Stage 4.
+
+    Args:
+        firm_factory: Callable returning a Firm, or None. If None, uses
+            firm_factory_default. Reserved for Phase-3 sweep reuse; individual
+            checks build their own params for axis isolation.
+
+    Returns:
+        dict with keys: "check2", "check6", "all_passed".
+        Each check value is {"passed": bool, "details": dict}.
+        Does NOT raise on failure — returns the dict for full reporting.
+    """
+    if firm_factory is None:
+        firm_factory = firm_factory_default
+
+    results: dict = {}
+
+    for check_name, check_fn in [
+        ("check2", check2_greedy_dominance),
+        ("check6", check6_no_switching_under_high_costs),
+    ]:
+        passed, details = check_fn(firm_factory)
+        results[check_name] = {"passed": passed, "details": details}
+
+    results["all_passed"] = all(
+        results[k]["passed"] for k in ("check2", "check6")
+    )
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Full-suite aggregator (all six checks)
+# ---------------------------------------------------------------------------
+
+
+def run_all_checks(firm_factory=None) -> dict:
+    """Run all six validation checks (Tier A + Tier B) and return a combined dict.
+
+    This is the single function the gate reviewer runs to validate Phase 1.
+    Covers: check1 (constant baseline), check2 (greedy dominance), check3
+    (monotonicity q_a), check4 (monotonicity w), check5 (numeraire invariance),
+    check6 (no switching under high costs).
+
+    Args:
+        firm_factory: Callable returning a Firm, or None. Passed through to
+            run_tier_a and run_tier_b; individual checks override params for
+            axis isolation.
+
+    Returns:
+        dict with keys: "tier_a", "tier_b", "all_passed".
+        "tier_a" and "tier_b" are the dicts returned by run_tier_a/run_tier_b.
+        "all_passed" is True iff both tier_a["all_passed"] and tier_b["all_passed"].
+    """
+    tier_a = run_tier_a(firm_factory)
+    tier_b = run_tier_b(firm_factory)
+    return {
+        "tier_a": tier_a,
+        "tier_b": tier_b,
+        "all_passed": tier_a["all_passed"] and tier_b["all_passed"],
+    }
