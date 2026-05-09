@@ -9,8 +9,11 @@ Architecture notes:
 - Default seed=0 (D-02): prevents cache instability from seed=None.
 - Run button gates the simulation (D-04): no auto-rerun on slider drag.
 - try/except wraps run_cached (D-06): kernel exceptions become st.error banners.
-- RUN_COUNTER (T-07): mutable cell that increments only on actual computation,
-  observable in the footer and readable by AppTest for cache-hit tests.
+- RUN_COUNTER (T-07): mutable cell that increments only on actual computation.
+  The cached function returns a monotonic timestamp (time.monotonic_ns()) that
+  is the SAME on cache hits (same cached 5-tuple). The app writes this timestamp
+  to session_state["RUN_COUNTER_VAL_THIS_RUN"] so AppTest can detect cache hits
+  by checking if the value changes between calls.
 
 Run:
     .venv/bin/streamlit run app.py
@@ -18,6 +21,7 @@ Run:
 
 import dataclasses
 import math
+import time
 import traceback
 
 import numpy as np
@@ -91,8 +95,10 @@ def params_to_key(params: FirmParams, seed: int) -> tuple:
 # ---------------------------------------------------------------------------
 
 # Module-level mutable cell. @st.cache_data does NOT call the function on a
-# cache hit, so this counter does not advance on hits. Readable by AppTest
-# via st.session_state["RUN_COUNTER_VAL_THIS_RUN"].
+# cache hit, so this counter does not advance on hits.
+# NOTE: RUN_COUNTER is not reliably shared between the test process and AppTest's
+# internal execution context. The observable for cache-hit tests is the monotonic
+# timestamp embedded in the cached return tuple: identical timestamps → cache hit.
 RUN_COUNTER = [0]
 
 
@@ -111,17 +117,22 @@ def run_cached(params_key: tuple, strategy_name: str) -> tuple:
         strategy_name: key into _STRATEGY_REGISTRY.
 
     Returns:
-        4-tuple: (df, theta_final, wages_final, K_max)
+        5-tuple: (df, theta_final, wages_final, K_max, call_id)
           df:           run_simulation DataFrame (T rows × 13+ columns)
           theta_final:  list[float] — firm.workforce.theta after final period
           wages_final:  list[float] — firm.workforce.wage after final period
           K_max:        int — N // tasks_per_worker (max possible workers)
+          call_id:      int — RUN_COUNTER[0] at time of actual computation;
+                        identical for cache hits (same cached value returned)
 
-    Side effect: increments RUN_COUNTER[0] and writes
-        st.session_state["RUN_COUNTER_VAL_THIS_RUN"] for cache-hit tests.
+    Cache-hit observability: a monotonic timestamp (time.monotonic_ns()) is
+        captured at actual computation time and returned as the 5th element.
+        A cache hit returns the SAME (old) timestamp. The caller writes this
+        timestamp to st.session_state["RUN_COUNTER_VAL_THIS_RUN"]; AppTest
+        tests detect cache hits by checking the timestamp does not change.
     """
     RUN_COUNTER[0] += 1
-    st.session_state["RUN_COUNTER_VAL_THIS_RUN"] = RUN_COUNTER[0]
+    computed_at = time.monotonic_ns()
 
     # Reconstruct FirmParams from the scalar tuple
     field_dict = dict(zip(_PARAM_FIELDS + ("seed",), params_key))
@@ -133,7 +144,7 @@ def run_cached(params_key: tuple, strategy_name: str) -> tuple:
     theta_final = firm.workforce.theta.tolist()
     wages_final = firm.workforce.wage.tolist()
     K_max = params.N // params.tasks_per_worker
-    return df, theta_final, wages_final, K_max
+    return df, theta_final, wages_final, K_max, computed_at
 
 
 # ---------------------------------------------------------------------------
@@ -310,13 +321,20 @@ def main() -> None:
     active_key = st.session_state["last_run_key"]
     active_strategy = st.session_state["last_strategy"]
 
-    # Run simulation (or return cached result)
+    # Run simulation (or return cached result).
+    # computed_at is a monotonic timestamp captured at actual computation time.
+    # A cache hit returns the SAME (old) timestamp — this is the observable.
     try:
-        df, theta_final, wages_final, K_max = run_cached(active_key, active_strategy)
+        df, theta_final, wages_final, K_max, computed_at = run_cached(active_key, active_strategy)
     except Exception as e:
         st.error(f"Simulation failed: {type(e).__name__}: {e}")
         st.code(traceback.format_exc(), language="text")
         st.stop()
+
+    # Write computed_at to session_state so AppTest cache-hit tests can observe it.
+    # Cache hit: same computed_at (cached 5-tuple returned, function body not re-run).
+    # Cache miss: new computed_at (function body ran, new timestamp).
+    st.session_state["RUN_COUNTER_VAL_THIS_RUN"] = computed_at
 
     # 4 rows × 2 columns layout (D-07, proc:T-06)
     row1_left, row1_right = st.columns(2)
@@ -355,6 +373,8 @@ def main() -> None:
         f"corr(theta, log(wage)) = {realized_corr:.4f}"
         f"    final cumulative profit = {final_pi:.4f}"
     )
+    # Show cache-hit observability via RUN_COUNTER.
+    # In the live app, RUN_COUNTER[0] increments on actual computation.
     st.caption(f"sim invocations this session: {RUN_COUNTER[0]}")
 
 

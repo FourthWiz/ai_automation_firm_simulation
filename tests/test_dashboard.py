@@ -279,41 +279,55 @@ class TestCacheHit:
     def _require_streamlit(self):
         pytest.importorskip("streamlit", minversion="1.28")
 
-    def _get_counter(self, at) -> int:
-        """Safely read RUN_COUNTER_VAL_THIS_RUN from AppTest session_state."""
+    def _get_timestamp(self, at) -> int:
+        """Safely read RUN_COUNTER_VAL_THIS_RUN (monotonic timestamp) from AppTest."""
         try:
             return int(at.session_state["RUN_COUNTER_VAL_THIS_RUN"])
         except (KeyError, AttributeError):
-            return 0
+            return -1
 
     def test_cache_hit_no_increment(self):
-        """Clicking Run twice with unchanged params should not increment counter."""
+        """Clicking Run twice with unchanged params should not change the timestamp.
+
+        run_cached returns a monotonic timestamp (computed_at = time.monotonic_ns())
+        captured at actual computation time. @st.cache_data returns the SAME cached
+        5-tuple on a hit, so computed_at does not change. The app writes computed_at
+        to session_state["RUN_COUNTER_VAL_THIS_RUN"] on every script run, so the
+        value is always present. A cache hit → same timestamp; cache miss → new one.
+        """
         from streamlit.testing.v1 import AppTest
 
-        # First run: app loads and executes one simulation
+        # First run: app loads. computed_at is set (either fresh or cached).
         at = AppTest.from_file("app.py", default_timeout=60).run()
         assert not at.exception
 
-        start_count = self._get_counter(at)
-        assert start_count >= 1, "Counter should be at least 1 after initial load"
+        start_ts = self._get_timestamp(at)
+        assert start_ts > 0, (
+            f"RUN_COUNTER_VAL_THIS_RUN should be a positive timestamp, got {start_ts}"
+        )
 
-        # Click Run with no slider changes — identical params_key → cache hit
+        # Click Run with no slider changes — identical params_key → cache hit.
+        # The cached 5-tuple is returned → same computed_at timestamp.
         at = at.button[0].click().run()
         assert not at.exception
 
-        end_count = self._get_counter(at)
-        assert end_count == start_count, (
-            f"Cache miss on identical params: counter went from {start_count} "
-            f"to {end_count} (expected no change)"
+        end_ts = self._get_timestamp(at)
+        assert end_ts == start_ts, (
+            f"Cache miss on identical params: timestamp changed from {start_ts} "
+            f"to {end_ts} (expected same — cache should return identical 5-tuple)"
         )
 
     def test_cache_miss_after_param_change(self):
-        """Changing a slider then clicking Run SHOULD increment counter (proves test validity)."""
+        """Changing a slider then clicking Run SHOULD change the timestamp.
+
+        A new params_key → cache miss → run_cached executes → new computed_at
+        timestamp. This proves the cache-hit test is not a false positive.
+        """
         from streamlit.testing.v1 import AppTest
 
         at = AppTest.from_file("app.py", default_timeout=60).run()
         assert not at.exception
-        start_count = self._get_counter(at)
+        start_ts = self._get_timestamp(at)
 
         # Find the q_a slider by label and change its value
         q_a_slider = None
@@ -330,8 +344,9 @@ class TestCacheHit:
         at = at.button[0].click().run()
         assert not at.exception
 
-        end_count = self._get_counter(at)
-        assert end_count == start_count + 1, (
-            f"Expected counter to increment by 1 after param change, "
-            f"went from {start_count} to {end_count}"
+        end_ts = self._get_timestamp(at)
+        assert end_ts != start_ts, (
+            f"Expected timestamp to change after param change (cache miss), "
+            f"but it stayed at {start_ts}. "
+            f"This may indicate the new params_key is incorrectly cached."
         )
