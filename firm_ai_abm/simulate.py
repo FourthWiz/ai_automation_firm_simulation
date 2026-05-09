@@ -9,6 +9,11 @@ Phase 1.5 Stage 1 additions:
   - wage_bill from ASSIGNED workers only (D-03: deviation from architecture §5 for all_T parity)
   - firm.K is now a read-only property; step 5 uses local K_modes variable
   - History gains 3 new columns: wage_bill, mean_theta, mean_wage
+
+Phase 1.5 Stage 2 additions:
+  - adj_cost now receives firm.workforce (per-worker training memory gate, D-02)
+  - adj_cost mutates workforce.a_trained as a side effect (D-02; documented in adjustment.py)
+  - History gains n_a_trained column (count of workers with a_trained==True, added T-10)
 """
 from typing import Callable
 
@@ -45,9 +50,11 @@ def run_simulation(firm: Firm, strategy: Callable, T: int | None = None) -> pd.D
 
     Returns:
         pd.DataFrame with columns {t, Y, C, pi, K, modes, adj_cost, wage_bill, mean_theta,
-        mean_wage}, one row per period. K records the mode-derived headcount (compute_K),
-        NOT workforce.K. New columns (wage_bill, mean_theta, mean_wage) are additive;
-        existing downstream code that reads pi and K is unaffected.
+        mean_wage, n_a_trained}, one row per period. K records the mode-derived headcount
+        (compute_K), NOT workforce.K. New columns (wage_bill, mean_theta, mean_wage,
+        n_a_trained) are additive; existing downstream code that reads pi and K is unaffected.
+        n_a_trained: int count of workers with a_trained==True at end of the period (after
+        adj_cost's in-place mutation, D-02).
 
     Risk citations:
         R-03: prev_modes captured AFTER strategy(firm, t) returns and BEFORE
@@ -76,7 +83,9 @@ def run_simulation(firm: Firm, strategy: Callable, T: int | None = None) -> pd.D
         )
 
         # Step 3: compute adjustment cost from prev to new
-        period_adj = compute_adj_cost(prev_modes, new_modes, firm.params)
+        # Stage 2: passes firm.workforce so adj_cost uses per-worker training memory
+        # (D-02 side effect: workforce.a_trained mutated in-place inside adj_cost)
+        period_adj = compute_adj_cost(prev_modes, new_modes, firm.params, firm.workforce)
 
         # Step 4: install new modes
         firm.modes = new_modes
@@ -122,6 +131,7 @@ def run_simulation(firm: Firm, strategy: Callable, T: int | None = None) -> pd.D
             "wage_bill": wage_bill,       # new: sum of assigned-worker wages
             "mean_theta": float(firm.workforce.theta.mean()),  # new: workforce mean theta
             "mean_wage": float(firm.workforce.wage.mean()),    # new: workforce mean wage
+            "n_a_trained": int(firm.workforce.a_trained.sum()),  # Stage 2: trained worker count
         })
 
     df = pd.DataFrame(firm.history)
