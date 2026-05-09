@@ -76,7 +76,9 @@ def run_simulation(firm: Firm, strategy: Callable, T: int | None = None) -> pd.D
         )
 
         # Step 3: compute adjustment cost from prev to new
-        period_adj = compute_adj_cost(prev_modes, new_modes, firm.params)
+        # Stage 2: passes firm.workforce so adj_cost uses per-worker training memory
+        # (D-02 side effect: workforce.a_trained mutated in-place inside adj_cost)
+        period_adj = compute_adj_cost(prev_modes, new_modes, firm.params, firm.workforce)
 
         # Step 4: install new modes
         firm.modes = new_modes
