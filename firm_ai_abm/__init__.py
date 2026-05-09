@@ -7,6 +7,7 @@ from firm_ai_abm.strategy import (
     all_H, all_A, all_T, greedy_profit, greedy_with_switching,
 )
 from firm_ai_abm.simulate import run_simulation
+from firm_ai_abm.viz import fig1_primary_lines, fig2_small_multiples_q_a, fig3_mode_mix_greedy
 
 __all__ = [
     "FirmParams",
@@ -23,4 +24,7 @@ __all__ = [
     "greedy_profit",
     "greedy_with_switching",
     "run_simulation",
+    "fig1_primary_lines",
+    "fig2_small_multiples_q_a",
+    "fig3_mode_mix_greedy",
 ]
