@@ -74,14 +74,23 @@ def greedy_profit(firm: Firm, t: int) -> np.ndarray:
     )
 
     p = firm.params
-    wage_per_task = p.w / p.tasks_per_worker  # smooth amortization of lumpy w*K (D-06)
+    # CRIT-1 fix: mode-agnostic slot indexing (slot assignment is a workforce property,
+    # NOT a mode property). Slot k covers tasks [k*tpw, (k+1)*tpw) regardless of mode.
+    slot_idx = np.arange(p.N) // p.tasks_per_worker  # shape (N,)
+    if firm.workforce.K == 0:
+        # All-T degenerate: no workers; score_T has no wage term so value is unused
+        worker_wage = np.full(p.N, p.w, dtype=np.float64)
+    else:
+        slot_idx_clamped = np.minimum(slot_idx, firm.workforce.K - 1)
+        worker_wage = firm.workforce.wage[slot_idx_clamped]  # shape (N,)
+    wage_per_task = worker_wage / p.tasks_per_worker  # shape (N,)
 
-    score_H = p.q_h - wage_per_task                                     # scalar
+    score_H = p.q_h - wage_per_task                                     # shape (N,)
     score_A = p.q_h * (1.0 + p.g * firm.beta) - p.c_aug - wage_per_task  # shape (N,)
     score_T = p.q_a * firm.alpha - p.c_auto                              # shape (N,); no wage
 
-    scores = np.zeros((p.N, 3), dtype=np.float64)  # zeros not empty (defensive, MIN-2)
-    scores[:, 0] = score_H  # broadcast scalar
+    scores = np.zeros((p.N, 3), dtype=np.float64)
+    scores[:, 0] = score_H
     scores[:, 1] = score_A
     scores[:, 2] = score_T
 
@@ -157,13 +166,21 @@ def greedy_with_switching(firm: Firm, t: int) -> np.ndarray:
     )
 
     p = firm.params
-    wage_per_task = p.w / p.tasks_per_worker  # smooth amortization of lumpy w*K (D-06)
+    # CRIT-1 fix: mode-agnostic slot indexing (slot assignment is a workforce property,
+    # NOT a mode property). Matches greedy_profit's wage computation exactly (D-04).
+    slot_idx = np.arange(p.N) // p.tasks_per_worker  # shape (N,)
+    if firm.workforce.K == 0:
+        worker_wage = np.full(p.N, p.w, dtype=np.float64)
+    else:
+        slot_idx_clamped = np.minimum(slot_idx, firm.workforce.K - 1)
+        worker_wage = firm.workforce.wage[slot_idx_clamped]  # shape (N,)
+    wage_per_task = worker_wage / p.tasks_per_worker  # shape (N,)
 
-    score_H = p.q_h - wage_per_task                                     # scalar
+    score_H = p.q_h - wage_per_task                                     # shape (N,)
     score_A = p.q_h * (1.0 + p.g * firm.beta) - p.c_aug - wage_per_task  # shape (N,)
     score_T = p.q_a * firm.alpha - p.c_auto                              # shape (N,); no wage
 
-    gross_scores = np.zeros((p.N, 3), dtype=np.float64)  # zeros not empty (MIN-2)
+    gross_scores = np.zeros((p.N, 3), dtype=np.float64)
     gross_scores[:, 0] = score_H
     gross_scores[:, 1] = score_A
     gross_scores[:, 2] = score_T
