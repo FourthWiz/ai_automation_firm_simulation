@@ -47,23 +47,27 @@ def fig_pi_over_time(df: pd.DataFrame) -> matplotlib.figure.Figure:
 
 
 def fig_K_over_time(df: pd.DataFrame) -> matplotlib.figure.Figure:
-    """Active worker count (K) over time.
+    """Worker headcount over time: packed formula (K) vs actual active (K_active).
+
+    K (packed formula) = ceil(n_H_or_A / tasks_per_worker) — underestimates
+    actual paying headcount when H/A tasks are scattered across task slots.
+    K_active = unique workers assigned to at least one H/A task — matches
+    wage_bill exactly. When N is small relative to tasks_per_worker the two
+    lines coincide; for large N they diverge and K_active is the correct count.
 
     Input:
-        df: run_simulation DataFrame with columns 't' (int) and 'K' (int,
-            number of active workers). Shape: (T, 13+).
+        df: run_simulation DataFrame with columns 't', 'K', 'K_active'.
     Output:
-        Figure with one Axes: line plot of df['K'] vs df['t'].
-        Y-axis uses integer ticks (MaxNLocator with integer=True).
-    Color: single line in #55A868 (green).
-    No disk I/O — returns Figure only.
+        Figure with one Axes, two lines. No disk I/O.
     """
     fig, ax = plt.subplots(figsize=(5, 3))
-    ax.plot(df["t"], df["K"], color="#55A868", linewidth=1.5)
+    ax.plot(df["t"], df["K_active"], color="#55A868", linewidth=1.5, label="K_active (actual)")
+    ax.plot(df["t"], df["K"], color="#4C72B0", linewidth=1.0, linestyle="--", label="K (packed formula)")
     ax.yaxis.set_major_locator(matplotlib.ticker.MaxNLocator(integer=True))
     ax.set_xlabel("period")
-    ax.set_ylabel("active workers (K)")
+    ax.set_ylabel("workers")
     ax.set_title("Active Workers Over Time")
+    ax.legend(fontsize=7, frameon=False)
     ax.grid(alpha=0.3)
     fig.tight_layout()
     return fig
