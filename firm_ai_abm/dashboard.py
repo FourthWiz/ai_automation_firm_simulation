@@ -24,6 +24,40 @@ from firm_ai_abm.production import Mode
 matplotlib.use("Agg")
 
 
+def fig_pi_per_period_over_time(df: pd.DataFrame) -> matplotlib.figure.Figure:
+    """Per-period profit over time with mean line and optional first-firing annotation.
+
+    Input:
+        df: run_simulation DataFrame with columns 't', 'pi', and optionally
+            'n_review_fired'. Shape: (T, 13+).
+    Output:
+        Figure with one Axes: line plot of df['pi'] vs df['t'], horizontal dashed
+        line at df['pi'].mean(), optional vertical dashed line at the first period
+        where n_review_fired > 0 (if any). No disk I/O.
+    Color: line in #4C72B0 (blue), mean line in gray, firing marker in #C44E52 (red).
+    """
+    fig, ax = plt.subplots(figsize=(5, 3))
+    ax.plot(df["t"], df["pi"], color="#4C72B0", linewidth=1.5, label="per-period π")
+    mean_pi = float(df["pi"].mean())
+    ax.axhline(mean_pi, color="gray", linewidth=0.8, linestyle="--",
+               label=f"mean={mean_pi:.2f}")
+
+    fired_col = df.get("n_review_fired", pd.Series(0, index=df.index))
+    first_fire_rows = df.loc[fired_col > 0, "t"]
+    if len(first_fire_rows) > 0:
+        first_fire_t = int(first_fire_rows.iloc[0])
+        ax.axvline(first_fire_t, color="#C44E52", linewidth=0.8, linestyle=":",
+                   label=f"first firing t={first_fire_t}")
+
+    ax.set_xlabel("period")
+    ax.set_ylabel("profit")
+    ax.set_title("Per-Period Profit")
+    ax.legend(fontsize=7, frameon=False)
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    return fig
+
+
 def fig_pi_over_time(df: pd.DataFrame) -> matplotlib.figure.Figure:
     """Cumulative profit over time.
 
@@ -90,6 +124,8 @@ def fig_K_over_time(df: pd.DataFrame) -> matplotlib.figure.Figure:
     else:
         ax.legend(fontsize=7, frameon=False)
 
+    ax.text(0.01, -0.18, "K = workforce headcount = N / tasks_per_worker",
+            transform=ax.transAxes, fontsize=7, color="gray")
     fig.tight_layout()
     return fig
 
@@ -279,5 +315,15 @@ def fig_trained_capital(df: pd.DataFrame) -> matplotlib.figure.Figure:
     ax.set_ylabel("trained workers (n_a_trained)")
     ax.set_title("Trained-Capital Workers Over Time")
     ax.grid(alpha=0.3)
+
+    # Degenerate annotation: flat nonzero series means all workers trained from early on
+    col_vals = col.values
+    if len(col_vals) > 0 and col_vals.min() == col_vals.max() and col_vals.max() > 0:
+        value = int(col_vals.max())
+        first_t = int(df.loc[col == value, "t"].iloc[0])
+        ax.text(0.5, 0.5, f"all {value} workers trained by t={first_t}",
+                transform=ax.transAxes, ha="center", va="center",
+                fontsize=9, color="#55A868", alpha=0.7)
+
     fig.tight_layout()
     return fig

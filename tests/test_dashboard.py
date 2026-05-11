@@ -221,6 +221,69 @@ class TestDashboardHelpers:
         fig = fig_trained_capital(df)
         self._assert_figure(fig, "fig_trained_capital (all_T zero)")
 
+    # --- Stage 5 T-10 new render tests ---
+
+    def test_fig_pi_per_period_over_time_renders(self, default_df):
+        """Stage 5 T-10: fig_pi_per_period_over_time renders and has at least one line."""
+        from firm_ai_abm.dashboard import fig_pi_per_period_over_time
+        import matplotlib.lines
+        df, firm, p = default_df
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            fig = fig_pi_per_period_over_time(df)
+            runtime_warnings = [x for x in w if issubclass(x.category, RuntimeWarning)]
+        assert len(runtime_warnings) == 0
+        self._assert_figure(fig, "fig_pi_per_period_over_time")
+        # Check at least one line artist exists
+        ax = fig.axes[0]
+        line_artists = [a for a in ax.get_children() if isinstance(a, matplotlib.lines.Line2D)]
+        assert len(line_artists) >= 1, "Expected at least one line in per-period profit plot"
+        matplotlib.pyplot.close(fig)
+
+    def test_K_active_caption_present(self, default_df):
+        """Stage 5 T-10: fig_K_over_time caption contains 'K = workforce headcount'."""
+        from firm_ai_abm.dashboard import fig_K_over_time
+        df, firm, p = default_df
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            fig = fig_K_over_time(df)
+        # Find text artists that contain the substring
+        ax = fig.axes[0]
+        text_strings = [t.get_text() for t in ax.texts]
+        # Also scan all text in figure
+        all_text = []
+        for a in fig.axes:
+            all_text.extend(t.get_text() for t in a.texts)
+        combined = " ".join(all_text)
+        assert "K = workforce headcount" in combined, (
+            f"Caption 'K = workforce headcount' not found in figure text. Got: {all_text}"
+        )
+        matplotlib.pyplot.close(fig)
+
+    def test_n_a_trained_degenerate_annotation(self, default_df):
+        """Stage 5 T-10: fig_trained_capital annotates when series is constant > 0."""
+        from firm_ai_abm.dashboard import fig_trained_capital
+        import pandas as pd
+
+        df, firm, p = default_df
+        # Build a df where n_a_trained is constant and > 0
+        df_degenerate = df.copy()
+        df_degenerate["n_a_trained"] = 5  # constant value > 0
+
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            fig = fig_trained_capital(df_degenerate)
+
+        # Check that the annotation text is present
+        all_text = []
+        for a in fig.axes:
+            all_text.extend(t.get_text() for t in a.texts)
+        combined = " ".join(all_text)
+        assert "trained by t=" in combined, (
+            f"Degenerate annotation 'trained by t=' not found. Got text: {all_text}"
+        )
+        matplotlib.pyplot.close(fig)
+
 
 # ---------------------------------------------------------------------------
 # T-08: AppTest smoke test (requires streamlit >= 1.28)
@@ -288,7 +351,7 @@ class TestAppSmoke:
         )
 
     def test_footer_caption_content(self):
-        """Footer captions contain required strings."""
+        """Footer captions contain required strings (Stage 5: total firings + final K_active)."""
         from streamlit.testing.v1 import AppTest
         at = AppTest.from_file("app.py", default_timeout=60).run()
         assert not at.exception
@@ -299,6 +362,12 @@ class TestAppSmoke:
         )
         assert "final cumulative profit =" in combined, (
             f"Footer missing profit text. Captions: {caption_values}"
+        )
+        assert "total firings" in combined, (
+            f"Footer missing 'total firings'. Captions: {caption_values}"
+        )
+        assert "final K_active" in combined, (
+            f"Footer missing 'final K_active'. Captions: {caption_values}"
         )
 
 
