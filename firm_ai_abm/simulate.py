@@ -44,6 +44,22 @@ Phase 1.5 Stage 6 additions:
     → task_to_worker_map) sees capacity-consistent modes. See D-13 for adj_cost semantics.
   - History gains K_active (already present) and NEW K_clamp_events column (int, 0 when no
     clamp; 1 when clamp fires this period).
+
+Phase 1.5 Stage 7 additions (adaptive-firing-surplus):
+  - aug_cost_per_worker matrix: shape (T, K_max), float64, mirrors output_per_worker
+    semantics (NaN for inactive slots; 0.0 for active H-mode workers; c_aug * n_A_tasks
+    for A-mode workers). Populated at Step 6 via a SEPARATE cost_vec call (D-07: two
+    independent calls per period; Step 7 byte-identity preserved for dormant-default fixtures).
+  - firing_review now receives aug_cost_per_worker as a 4th positional arg and computes
+    effective_surplus = p * mean_output - wage - mean_aug_cost - F/K_review (four-term formula).
+    K_review is captured ONCE before any fire mask is evaluated (stale-K cascade damping, D-01).
+  - apply_firings and replace_to_target now accept and return aug_cost_per_worker alongside
+    output_per_worker, applying the same NaN-trail / column-reorder semantics.
+  - firm.aug_cost_per_worker: post-run attribute exposing the matrix (mirrors firm.output_per_worker).
+  - F-share enters firing decisions only; cost ledger C uses params.F unconditionally (unchanged).
+  - Per-period overhead: one additional cost_vec call (≈ N float ops, D-07) regardless of
+    T_review, accepted to preserve Step-7 byte-identity with dormant-default fixtures.
+    Two cost_vec calls per tick by design.
 """
 import math
 from typing import Callable
