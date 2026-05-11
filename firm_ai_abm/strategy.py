@@ -202,6 +202,12 @@ def greedy_with_switching(firm: Firm, t: int) -> np.ndarray:
     # S[1, 0] (A -> H) = 0: same worker class (no fire) + no c_train refund (D-02)
     # Diagonal = 0: no cost to stay in same mode
 
+    if p.enable_training_delay:
+        # Full one-period aug-output loss (NOT pre-divided by n_amortize).
+        # S_amort = S / n_amortize below divides it once — correct amortization.
+        mean_beta = float(firm.beta.mean())
+        S[0, 1] += p.q_h * p.g * mean_beta
+
     S_amort = S / p.n_amortize  # amortize over n_amortize periods (R-05)
 
     # Fancy indexing: switch_cost[i] = S_amort[prev[i], :] -> shape (N, 3)

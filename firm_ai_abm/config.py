@@ -8,7 +8,7 @@ class FirmParams:
     # Counts
     N: int = 100                 # number of tasks
     T: int = 60                  # number of periods
-    tasks_per_worker: int = 10   # how many tasks one worker covers
+    tasks_per_worker: int = 5    # how many tasks one worker covers
 
     # Productivity
     q_h: float = 1.0             # human productivity per task (numeraire)
@@ -25,7 +25,7 @@ class FirmParams:
     F: float = 5.0               # fixed cost per period
 
     # Prices
-    p: float = 1.0               # output price (numeraire)
+    p: float = 0.22              # output price (recalibrated; tpw=5, p=0.22 → all-H baseline ≈ −3/period)
 
     # Strategy
     n_amortize: int = 6          # horizon for greedy-with-switching amortization
@@ -49,3 +49,11 @@ class FirmParams:
                                   # T_review=10.0 (or any finite value).
     firing_threshold: float = 0.0  # fire workers with surplus < firing_threshold
                                     # (defaults to 0.0 = fire negative-surplus workers)
+
+    # Training delay (Phase 1.5 Stage 6 — dormant by default)
+    enable_training_delay: bool = False  # when True, H->A workers produce as H for 1 period before aug kicks in
+
+    # Margin scenario (Phase 1.5 Stage 6)
+    scenario_mode: str = "price"   # "price" or "margin"
+    target_margin: float = 0.05    # target (revenue - cost) / revenue when scenario_mode == "margin"
+    margin_horizon: int = 5        # look-ahead periods for margin-optimizer brute grid

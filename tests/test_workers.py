@@ -84,7 +84,7 @@ def test_t09_task_to_worker_map_capacity_assert():
 
 def test_t10_sampling_determinism():
     """Same params + same rng seed → identical arrays."""
-    params = FirmParams(seed=0)
+    params = FirmParams(seed=0, tasks_per_worker=10, p=1.0)
     rng1 = np.random.default_rng(42)
     rng2 = np.random.default_rng(42)
     wf1 = sample_workforce(100, params, rng1)
@@ -95,7 +95,7 @@ def test_t10_sampling_determinism():
 
 def test_t10_degenerate_sigma_zero():
     """sigma_theta=0, sigma_w=0 → theta==ones, wage==full(K, w) EXACTLY."""
-    params = FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0)
+    params = FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0, tasks_per_worker=10, p=1.0)
     rng = np.random.default_rng(99)
     wf = sample_workforce(100, params, rng)
     assert np.array_equal(wf.theta, np.ones(100)), f"theta != ones: {wf.theta[:5]}"
@@ -104,7 +104,7 @@ def test_t10_degenerate_sigma_zero():
 
 def test_t10_degenerate_no_rng_consumption():
     """sigma_theta=0 path: rng state before == rng state after (D-08 short-circuit)."""
-    params = FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0)
+    params = FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0, tasks_per_worker=10, p=1.0)
     rng = np.random.default_rng(77)
     # Consume one draw to establish a reference point
     ref_val = rng.standard_normal()
@@ -127,7 +127,7 @@ def test_t10_correlation_calibration():
     The correct calibration check is the OLS slope of log_wage on log_theta,
     which should approximate corr_w_theta ≈ 0.3 (Stage 5 default).
     """
-    params = FirmParams(seed=0)  # sigma_theta=0.2, corr_w_theta=0.3 (Stage 5), sigma_w=0.05
+    params = FirmParams(seed=0, tasks_per_worker=10, p=1.0)  # sigma_theta=0.2, corr_w_theta=0.3 (Stage 5), sigma_w=0.05
     rng = np.random.default_rng(42)
     wf = sample_workforce(1000, params, rng)
     log_theta = np.log(wf.theta)
@@ -146,7 +146,7 @@ def test_t10_correlation_calibration():
 
 def test_T06a_wage_mean_preservation_sample_level():
     """Stage 5 D-02: E[wage] ≈ w within 3% at K=1000, default sigmas."""
-    params = FirmParams(seed=0)  # sigma_theta=0.2, sigma_w=0.05
+    params = FirmParams(seed=0, tasks_per_worker=10, p=1.0)  # sigma_theta=0.2, sigma_w=0.05
     rng = np.random.default_rng(2025)
     wf = sample_workforce(1000, params, rng)
     assert abs(wf.wage.mean() - params.w) < 0.03 * params.w, (
@@ -156,7 +156,7 @@ def test_T06a_wage_mean_preservation_sample_level():
 
 def test_T06b_wage_mean_preservation_exact_at_sigma_w_zero():
     """Stage 5 D-02: when sigma_w=0, sample mean of wage equals w EXACTLY (within 1e-10)."""
-    params = FirmParams(seed=0, sigma_w=0.0, sigma_theta=0.2)
+    params = FirmParams(seed=0, sigma_w=0.0, sigma_theta=0.2, tasks_per_worker=10, p=1.0)
     rng = np.random.default_rng(2025)
     wf = sample_workforce(1000, params, rng)
     assert abs(wf.wage.mean() - params.w) < 1e-10, (
@@ -170,7 +170,7 @@ def test_T06c_wage_mean_multi_batch_drift():
     Per-batch structural invariant (sigma_w=0 path): each batch's wage.mean() == w
     within 1e-10, pinning that the sample-mean normalization is applied per-batch.
     """
-    params_default = FirmParams(seed=0)  # sigma_theta=0.2, sigma_w=0.05
+    params_default = FirmParams(seed=0, tasks_per_worker=10, p=1.0)  # sigma_theta=0.2, sigma_w=0.05
     K = 50
     rng = np.random.default_rng(314159)
 
@@ -185,7 +185,7 @@ def test_T06c_wage_mean_multi_batch_drift():
     )
 
     # Per-batch structural invariant: sigma_w=0 → each batch mean = w exactly
-    params_sw0 = FirmParams(seed=0, sigma_theta=0.2, sigma_w=0.0)
+    params_sw0 = FirmParams(seed=0, sigma_theta=0.2, sigma_w=0.0, tasks_per_worker=10, p=1.0)
     rng2 = np.random.default_rng(271828)
     for i in range(6):
         batch_wf = sample_workforce(K, params_sw0, rng2)
@@ -206,7 +206,7 @@ def test_t11_multiplicative_augmentation():
     Any non-multiplicative form (additive bias, compressive eta) produces different floats.
     """
     N = 20  # 2 workers × 10 tasks_per_worker
-    params = FirmParams(seed=0, N=N, tasks_per_worker=10)
+    params = FirmParams(seed=0, N=N, tasks_per_worker=10, p=1.0)
     theta_vals = np.array([0.5, 1.5])
 
     # Build a firm and manually set workforce theta
@@ -257,7 +257,7 @@ def test_t12_numeraire_under_heterogeneity():
     """
     from firm_ai_abm.validate import SCALED_PARAMS
 
-    base_params = FirmParams(seed=0, sigma_theta=0.2, sigma_w=0.05)
+    base_params = FirmParams(seed=0, sigma_theta=0.2, sigma_w=0.05, tasks_per_worker=10, p=1.0)
     # Pure strategies only: modes are fixed, so profit scales linearly with the numeraire
     pure_strategies = [all_H, all_A, all_T]
 
@@ -302,7 +302,7 @@ def test_t12_numeraire_under_heterogeneity():
 
 def test_t13_wage_symmetry_degenerate():
     """In degenerate case (sigma=0): strategy's wage_per_task * tpw == w (scalar Phase 1 value)."""
-    params = FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0)
+    params = FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0, tasks_per_worker=10, p=1.0)
     firm = make_firm(params)
     # With uniform wage w, every slot gets wage_per_task = w / tpw
     slot_idx = np.arange(params.N) // params.tasks_per_worker
@@ -321,7 +321,7 @@ def test_t13_wage_symmetry_distinct_wages():
     N = 50
     K = 5
     tpw = 10
-    params = FirmParams(seed=0, N=N, tasks_per_worker=tpw, sigma_theta=0.0, sigma_w=0.0)
+    params = FirmParams(seed=0, N=N, tasks_per_worker=tpw, sigma_theta=0.0, sigma_w=0.0, p=1.0)
     firm = make_firm(params)
     # Override wages to be distinct
     firm.workforce.wage[:] = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
@@ -350,7 +350,7 @@ def test_t14_greedy_uniform_theta_modes():
     Includes a T-mode period: verifies greedy picks T-mode tasks at t=0 (when profitable)
     and modes stay byte-identical to Phase 1 (CRIT-1 fix effective).
     """
-    params = FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0)
+    params = FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0, tasks_per_worker=10, p=1.0)
     # Run Phase 1.5 with degenerate params
     firm15 = make_firm(params)
     df15_gp = run_simulation(firm15, greedy_profit)
@@ -385,7 +385,7 @@ def test_t15_workforce_persists_across_reset():
     CRIT-2: reset() must NOT resample workforce — it would consume rng state and break
     check2_greedy_dominance which reuses one firm across five strategies.
     """
-    firm = make_firm(FirmParams(seed=0))
+    firm = make_firm(FirmParams(seed=0, tasks_per_worker=10, p=1.0))
 
     # Capture snapshots BEFORE any run
     theta_snapshot = firm.workforce.theta.copy()

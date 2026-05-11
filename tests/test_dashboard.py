@@ -35,7 +35,7 @@ from firm_ai_abm.strategy import greedy_profit, all_T
 @pytest.fixture(scope="module")
 def default_df():
     """Run simulation with default FirmParams(seed=0) and greedy_profit."""
-    p = FirmParams(seed=0)
+    p = FirmParams(seed=0, tasks_per_worker=10, p=1.0)
     firm = make_firm(p)
     df = run_simulation(firm, greedy_profit)
     return df, firm, p
@@ -44,7 +44,7 @@ def default_df():
 @pytest.fixture(scope="module")
 def all_t_df():
     """Run simulation with all_T strategy (tests empty wage_bill / n_a_trained)."""
-    p = FirmParams(seed=0)
+    p = FirmParams(seed=0, tasks_per_worker=10, p=1.0)
     firm = make_firm(p)
     df = run_simulation(firm, all_T)
     return df, firm, p
@@ -89,7 +89,7 @@ class TestDashboardHelpers:
     def test_fig_K_over_time_with_firings(self):
         """When firings occur, fig_K_over_time renders a twin-axis with firing bars."""
         from firm_ai_abm.dashboard import fig_K_over_time
-        p = FirmParams(seed=0, T_review=10.0, firing_threshold=100.0)
+        p = FirmParams(seed=0, T_review=10.0, firing_threshold=100.0, tasks_per_worker=10, p=1.0)
         firm = make_firm(p)
         df = run_simulation(firm, greedy_profit)
         assert (df["n_review_fired"] > 0).any(), "Expected firing events for this test"
@@ -161,7 +161,7 @@ class TestDashboardHelpers:
         from firm_ai_abm.dashboard import fig_firing_events
         # firing_threshold=100.0 (kernel) >> any realistic surplus (~8-9), so all
         # workers are fired at every review period — guarantees non-empty markers.
-        p = FirmParams(seed=0, T_review=10.0, firing_threshold=100.0)
+        p = FirmParams(seed=0, T_review=10.0, firing_threshold=100.0, tasks_per_worker=10, p=1.0)
         firm = make_firm(p)
         df = run_simulation(firm, greedy_profit)
         assert (df["n_review_fired"] > 0).any(), "Expected actual firing events"
@@ -177,7 +177,7 @@ class TestDashboardHelpers:
     def test_fig_firing_events_active_review_no_firings(self):
         """T_review=10 but firing_threshold=0 → no firings; fallback message distinguishes from inf."""
         from firm_ai_abm.dashboard import fig_firing_events
-        p = FirmParams(seed=0, T_review=10.0, firing_threshold=0.0)
+        p = FirmParams(seed=0, T_review=10.0, firing_threshold=0.0, tasks_per_worker=10, p=1.0)
         firm = make_firm(p)
         df = run_simulation(firm, greedy_profit)
         assert (df["n_review_fired"] == 0).all(), "Expected zero firings with threshold=0"
@@ -319,7 +319,12 @@ class TestAppSmoke:
         assert len(at.sidebar.number_input) > 0, "No number_input widgets in sidebar"
 
     def test_sidebar_all_param_fields_present(self):
-        """All 22 param field names appear as widget labels in sidebar."""
+        """All param field names appear as widget labels in sidebar.
+
+        scenario_mode is rendered as the "Scenario" radio (key="scenario"), not as a
+        widget labeled "scenario_mode". enable_training_delay is a checkbox.
+        Both are exempt from the label-match check.
+        """
         import sys
         import os
         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -327,13 +332,20 @@ class TestAppSmoke:
         from app import _PARAM_FIELDS
         at = AppTest.from_file("app.py", default_timeout=60).run()
         assert not at.exception
-        # Collect all widget labels from sidebar (WidgetList is not directly summable)
+        # Collect all widget labels from sidebar (sliders, number_inputs, select_sliders, checkboxes)
         all_labels = set()
-        for widget in list(at.sidebar.slider) + list(at.sidebar.number_input) + list(at.sidebar.select_slider):
+        for widget in (
+            list(at.sidebar.slider)
+            + list(at.sidebar.number_input)
+            + list(at.sidebar.select_slider)
+            + list(at.sidebar.checkbox)
+        ):
             all_labels.add(widget.label)
-        # T_review is rendered as select_slider with label "T_review"
-        # The sidebar uses exact field names as labels (per plan T-05)
+        # scenario_mode is a radio labeled "Scenario" (not the field name) — exempt
+        _EXEMPT = {"scenario_mode"}
         for field in _PARAM_FIELDS:
+            if field in _EXEMPT:
+                continue
             assert field in all_labels, (
                 f"Param field '{field}' not found as a sidebar widget label. "
                 f"Available labels: {sorted(all_labels)}"
@@ -471,7 +483,7 @@ def test_README_margin_recipe_at_default_seed():
     from firm_ai_abm.simulate import run_simulation
     from firm_ai_abm.strategy import greedy_profit
 
-    params = FirmParams(seed=0, w=8.0, c_auto=0.6, F=5)
+    params = FirmParams(seed=0, w=8.0, c_auto=0.6, F=5, tasks_per_worker=10, p=1.0)
     firm = make_firm(params)
     df = run_simulation(firm, greedy_profit)
     margin = float(df["pi"].mean() / df["Y"].mean())
@@ -479,3 +491,108 @@ def test_README_margin_recipe_at_default_seed():
         f"README margin recipe out of range: margin={margin:.3f} ({margin*100:.1f}%). "
         "If recipe parameters changed, update README and this test together."
     )
+
+
+# ---------------------------------------------------------------------------
+# T-11: Stale-banner and margin-scenario AppTest coverage
+# ---------------------------------------------------------------------------
+
+
+class TestDashboardStaleBanner:
+    """T-11: AppTest coverage for the stale-run banner (T-10)."""
+
+    def _get_at(self):
+        try:
+            from streamlit.testing.v1 import AppTest
+        except ImportError:
+            pytest.skip("streamlit AppTest not available")
+        at = AppTest.from_file("app.py", default_timeout=30)
+        at.run()
+        return at
+
+    def test_no_banner_on_fresh_load(self):
+        """T-11: No stale-banner on fresh load + Run."""
+        at = self._get_at()
+        at.button[0].click()  # Run
+        at.run()
+        stale_warnings = [w for w in at.warning if "Params changed" in str(w.value)]
+        assert len(stale_warnings) == 0, (
+            f"Expected no 'Params changed' warning on fresh load, found {len(stale_warnings)}"
+        )
+
+    def test_banner_on_param_change(self):
+        """T-11: Stale-banner appears after param change without pressing Run."""
+        at = self._get_at()
+        # Click Run once to establish last_run_key
+        at.button[0].click()
+        at.run()
+        # Change N slider value without clicking Run
+        n_input = next((inp for inp in at.number_input if inp.key == "N"), None)
+        if n_input is None:
+            pytest.skip("N number_input not found (widget structure may have changed)")
+        n_input.set_value(n_input.value + 10)
+        at.run()
+        stale_warnings = [w for w in at.warning if "Params changed" in str(w.value)]
+        assert len(stale_warnings) >= 1, (
+            "Expected 'Params changed' warning after param change without Run"
+        )
+
+    def test_banner_clears_after_run(self):
+        """T-11: Banner clears after clicking Run."""
+        at = self._get_at()
+        at.button[0].click()
+        at.run()
+        n_input = next((inp for inp in at.number_input if inp.key == "N"), None)
+        if n_input is None:
+            pytest.skip("N number_input not found")
+        n_input.set_value(n_input.value + 10)
+        at.run()
+        # Now click Run to clear the banner
+        at.button[0].click()
+        at.run()
+        stale_warnings = [w for w in at.warning if "Params changed" in str(w.value)]
+        assert len(stale_warnings) == 0, (
+            "Expected banner to clear after clicking Run"
+        )
+
+
+class TestDashboardMarginScenario:
+    """T-11: AppTest coverage for the margin scenario UI."""
+
+    def _get_at(self):
+        try:
+            from streamlit.testing.v1 import AppTest
+        except ImportError:
+            pytest.skip("streamlit AppTest not available")
+        at = AppTest.from_file("app.py", default_timeout=30)
+        at.run()
+        return at
+
+    def test_margin_scenario_widgets_visible(self):
+        """T-11: In margin mode, target_margin slider and margin_horizon number_input are present."""
+        at = self._get_at()
+        scenario_radio = next((r for r in at.radio if r.key == "scenario"), None)
+        if scenario_radio is None:
+            pytest.skip("scenario radio not found")
+        scenario_radio.set_value("margin")
+        at.run()
+        slider_keys = {s.key for s in at.slider}
+        input_keys = {inp.key for inp in at.number_input}
+        assert "target_margin" in slider_keys, "target_margin slider not visible in margin mode"
+        assert "margin_horizon" in input_keys, "margin_horizon number_input not visible in margin mode"
+
+    def test_margin_scenario_strategy_auto_target(self):
+        """T-11: Selecting margin scenario forces strategy=target_margin in cached call."""
+        at = self._get_at()
+        scenario_radio = next((r for r in at.radio if r.key == "scenario"), None)
+        if scenario_radio is None:
+            pytest.skip("scenario radio not found")
+        scenario_radio.set_value("margin")
+        at.run()
+        at.button[0].click()
+        at.run()
+        # The caption should say "Strategy: target_margin"
+        captions = [c.value for c in at.caption]
+        assert any("target_margin" in str(c) for c in captions), (
+            f"Expected caption mentioning 'target_margin' in margin mode, got: {captions}"
+        )

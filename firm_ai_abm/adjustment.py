@@ -164,7 +164,12 @@ def adj_cost(
         training_cost = params.c_train * n_first_a
         # D-02: flip AFTER cost computed, BEFORE return
         if len(newly_trained) > 0:
-            workforce.a_trained[newly_trained] = True
+            if params.enable_training_delay:
+                # Mark workers as in-training; a_trained flip happens at step 11.5
+                workforce.a_training_in_progress[newly_trained] = True
+            else:
+                # Legacy Stage 2: flip a_trained immediately (byte-identical)
+                workforce.a_trained[newly_trained] = True
 
     # Lumpy hire/fire based on K change (architecture D-02)
     K_prev = compute_K(prev_modes, params)

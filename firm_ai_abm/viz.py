@@ -73,7 +73,7 @@ def fig1_primary_lines(
         matplotlib.figure.Figure (caller decides when to close).
     """
     if params is None:
-        params = FirmParams(seed=0)
+        params = FirmParams(seed=0, tasks_per_worker=10, p=1.0)
     if save_dir is None:
         save_dir = pathlib.Path("results/figures")
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -154,7 +154,7 @@ def fig2_small_multiples_q_a(
         matplotlib.figure.Figure (caller decides when to close).
     """
     if params is None:
-        params = FirmParams(seed=0)
+        params = FirmParams(seed=0, tasks_per_worker=10, p=1.0)
     if save_dir is None:
         save_dir = pathlib.Path("results/figures")
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -238,7 +238,7 @@ def fig3_mode_mix_greedy(
         matplotlib.figure.Figure (caller decides when to close).
     """
     if params is None:
-        params = FirmParams(seed=0)
+        params = FirmParams(seed=0, tasks_per_worker=10, p=1.0)
     if save_dir is None:
         save_dir = pathlib.Path("results/figures")
     save_dir.mkdir(parents=True, exist_ok=True)

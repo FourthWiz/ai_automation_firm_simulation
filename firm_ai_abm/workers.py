@@ -45,6 +45,7 @@ class Workforce:
     a_trained: np.ndarray  # True if worker has completed A-mode training, bool
     tenure: np.ndarray   # periods employed at this firm, int
     hire_t: np.ndarray   # period at which worker was hired, int
+    a_training_in_progress: np.ndarray = None  # True for exactly the first period of H->A transition (bool)
 
     @property
     def K(self) -> int:
@@ -96,6 +97,7 @@ def sample_workforce(
         a_trained=np.zeros(K, dtype=bool),
         tenure=np.zeros(K, dtype=int),
         hire_t=np.full(K, current_t, dtype=int),
+        a_training_in_progress=np.zeros(K, dtype=bool),
     )
 
 
