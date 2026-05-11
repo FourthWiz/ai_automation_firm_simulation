@@ -120,13 +120,14 @@ def test_t10_degenerate_no_rng_consumption():
 
 
 def test_t10_correlation_calibration():
-    """Default params: regression coefficient (elasticity) of log_wage on log_theta ≈ 0.7 ± 0.1.
+    """Default params: regression coefficient (elasticity) of log_wage on log_theta ≈ 0.3 ± 0.1.
 
+    Stage 5 D-01: corr_w_theta default changed from 0.7 to 0.3.
     corr_w_theta is an elasticity exponent, NOT a Pearson r (see field comment).
     The correct calibration check is the OLS slope of log_wage on log_theta,
-    which should approximate corr_w_theta ≈ 0.7 (verifying the formula is correct).
+    which should approximate corr_w_theta ≈ 0.3 (Stage 5 default).
     """
-    params = FirmParams(seed=0)  # sigma_theta=0.2, corr_w_theta=0.7, sigma_w=0.05
+    params = FirmParams(seed=0)  # sigma_theta=0.2, corr_w_theta=0.3 (Stage 5), sigma_w=0.05
     rng = np.random.default_rng(42)
     wf = sample_workforce(1000, params, rng)
     log_theta = np.log(wf.theta)
@@ -136,6 +137,62 @@ def test_t10_correlation_calibration():
     assert abs(beta - params.corr_w_theta) < 0.1, (
         f"Elasticity beta={beta:.3f} not close to corr_w_theta={params.corr_w_theta} (±0.1)"
     )
+
+
+# ---------------------------------------------------------------------------
+# T-06: Wage-mean preservation tests (Stage 5 D-02 mean-preserving formula)
+# ---------------------------------------------------------------------------
+
+
+def test_T06a_wage_mean_preservation_sample_level():
+    """Stage 5 D-02: E[wage] ≈ w within 3% at K=1000, default sigmas."""
+    params = FirmParams(seed=0)  # sigma_theta=0.2, sigma_w=0.05
+    rng = np.random.default_rng(2025)
+    wf = sample_workforce(1000, params, rng)
+    assert abs(wf.wage.mean() - params.w) < 0.03 * params.w, (
+        f"wage mean={wf.wage.mean():.4f} deviated >3% from w={params.w}"
+    )
+
+
+def test_T06b_wage_mean_preservation_exact_at_sigma_w_zero():
+    """Stage 5 D-02: when sigma_w=0, sample mean of wage equals w EXACTLY (within 1e-10)."""
+    params = FirmParams(seed=0, sigma_w=0.0, sigma_theta=0.2)
+    rng = np.random.default_rng(2025)
+    wf = sample_workforce(1000, params, rng)
+    assert abs(wf.wage.mean() - params.w) < 1e-10, (
+        f"sigma_w=0: wage mean={wf.wage.mean():.12f} not exactly w={params.w}"
+    )
+
+
+def test_T06c_wage_mean_multi_batch_drift():
+    """Stage 5 D-02: 6 replacement batches of K=50; overall mean within 3% of w.
+
+    Per-batch structural invariant (sigma_w=0 path): each batch's wage.mean() == w
+    within 1e-10, pinning that the sample-mean normalization is applied per-batch.
+    """
+    params_default = FirmParams(seed=0)  # sigma_theta=0.2, sigma_w=0.05
+    K = 50
+    rng = np.random.default_rng(314159)
+
+    # Overall multi-batch drift test (sigma_w=0.05)
+    all_wages = []
+    for _ in range(6):
+        wf = sample_workforce(K, params_default, rng)
+        all_wages.extend(wf.wage.tolist())
+    final_mean = sum(all_wages) / len(all_wages)
+    assert abs(final_mean - params_default.w) < 0.03 * params_default.w, (
+        f"Multi-batch mean drift: {final_mean:.4f} vs w={params_default.w} (>3%)"
+    )
+
+    # Per-batch structural invariant: sigma_w=0 → each batch mean = w exactly
+    params_sw0 = FirmParams(seed=0, sigma_theta=0.2, sigma_w=0.0)
+    rng2 = np.random.default_rng(271828)
+    for i in range(6):
+        batch_wf = sample_workforce(K, params_sw0, rng2)
+        assert abs(batch_wf.wage.mean() - params_sw0.w) < 1e-10, (
+            f"Per-batch exact invariant violated at batch {i}: "
+            f"mean={batch_wf.wage.mean():.12f} vs w={params_sw0.w}"
+        )
 
 
 # ---------------------------------------------------------------------------
