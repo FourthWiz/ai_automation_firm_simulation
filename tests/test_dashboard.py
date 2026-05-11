@@ -86,6 +86,22 @@ class TestDashboardHelpers:
         assert len(runtime_warnings) == 0
         self._assert_figure(fig, "fig_K_over_time")
 
+    def test_fig_K_over_time_with_firings(self):
+        """When firings occur, fig_K_over_time renders a twin-axis with firing bars."""
+        from firm_ai_abm.dashboard import fig_K_over_time
+        p = FirmParams(seed=0, T_review=10.0, firing_threshold=100.0)
+        firm = make_firm(p)
+        df = run_simulation(firm, greedy_profit)
+        assert (df["n_review_fired"] > 0).any(), "Expected firing events for this test"
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            fig = fig_K_over_time(df)
+            runtime_warnings = [x for x in w if issubclass(x.category, RuntimeWarning)]
+        assert len(runtime_warnings) == 0
+        assert isinstance(fig, matplotlib.figure.Figure)
+        assert len(fig.axes) == 2, "Expected twin axes when firings present"
+        matplotlib.pyplot.close(fig)
+
     def test_fig_mode_mix_area(self, default_df):
         from firm_ai_abm.dashboard import fig_mode_mix_area
         df, firm, p = default_df
@@ -141,18 +157,36 @@ class TestDashboardHelpers:
         self._assert_figure(fig, "fig_firing_events (empty)")
 
     def test_fig_firing_events_nonempty(self):
-        """T_review=10 produces firing events; verify markers render."""
+        """T_review=10 + high firing_threshold guarantees firings; verify markers render."""
         from firm_ai_abm.dashboard import fig_firing_events
-        p = FirmParams(seed=0, T_review=10.0)
+        # firing_threshold=100.0 (kernel) >> any realistic surplus (~8-9), so all
+        # workers are fired at every review period — guarantees non-empty markers.
+        p = FirmParams(seed=0, T_review=10.0, firing_threshold=100.0)
         firm = make_firm(p)
         df = run_simulation(firm, greedy_profit)
+        assert (df["n_review_fired"] > 0).any(), "Expected actual firing events"
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            fig = fig_firing_events(df)
+            fig = fig_firing_events(df, T_review=10.0)
             runtime_warnings = [x for x in w if issubclass(x.category, RuntimeWarning)]
         assert len(runtime_warnings) == 0
         assert isinstance(fig, matplotlib.figure.Figure)
         assert len(fig.axes) >= 1
+        matplotlib.pyplot.close(fig)
+
+    def test_fig_firing_events_active_review_no_firings(self):
+        """T_review=10 but firing_threshold=0 → no firings; fallback message distinguishes from inf."""
+        from firm_ai_abm.dashboard import fig_firing_events
+        p = FirmParams(seed=0, T_review=10.0, firing_threshold=0.0)
+        firm = make_firm(p)
+        df = run_simulation(firm, greedy_profit)
+        assert (df["n_review_fired"] == 0).all(), "Expected zero firings with threshold=0"
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            fig = fig_firing_events(df, T_review=10.0)
+            runtime_warnings = [x for x in w if issubclass(x.category, RuntimeWarning)]
+        assert len(runtime_warnings) == 0
+        assert isinstance(fig, matplotlib.figure.Figure)
         matplotlib.pyplot.close(fig)
 
     def test_fig_trained_capital(self, default_df):
