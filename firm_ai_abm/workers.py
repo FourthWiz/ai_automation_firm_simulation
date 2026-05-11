@@ -1,15 +1,33 @@
-"""Worker heterogeneity for Phase 1.5 Stage 1.
+"""Worker heterogeneity for Phase 1.5 Stage 1 / Stage 5.
 
 Workforce is represented as a struct-of-arrays (SoA) for vectorized hot-path
 performance. No list-of-Worker objects — all arrays are shape (K,).
 
-Key design decisions (from current-plan.md):
+Key design decisions:
   D-02: Augmentation × heterogeneity is multiplicative: theta * q_h * (1 + g * beta).
   D-03: Wage bill uses ASSIGNED workers only (deviation from architecture §5 — load-bearing
         for all_T byte-parity; Stage 3 must choose between "idle workers cost nothing" vs
         "idle workers cost wages").
-  D-08: sigma==0 short-circuit: no rng draws when sigma_theta==0 or sigma_w==0,
+  D-08: sigma==0 short-circuit: no rng draws when sigma_theta==0 OR sigma_w==0,
         eliminating numpy-version dependency on Generator.normal(scale=0) behavior.
+
+Stage 5 wage-formula change (D-02 numeraire contract):
+  Mean-preserving tilt: wage = w * (theta^c / mean(theta^c)) * exp(eps - sigma_w^2/2)
+  where c = corr_w_theta, eps ~ Normal(0, sigma_w).
+  Two normalizations ensure E[wage] = w:
+    - theta-tilt divided by its SAMPLE mean → tilt mean is exactly 1.0 within the batch.
+    - exp(eps - sigma_w^2/2) has E = 1.0 exactly.
+  Degenerate path (sigma_theta=0, sigma_w=0): theta = ones(K), mean(theta^c) = 1.0,
+  eps = 0 → wage = w * 1.0 * 1.0 = w. Byte-equal to Stage-1 sigma=0 contract.
+
+  Note (MIN-4): varying theta_min/theta_max changes the clip range, which shifts
+  theta^c.mean() and hence the wage tilt. This is intentional — theta_min/theta_max
+  sliders affect wage scale through the normalization.
+
+  Replacement-draw normalization: each call to sample_workforce normalizes by the
+  REPLACEMENT batch's mean (sample-mean, not population-mean). Each call is mean-
+  preserving for its own batch; combined workforce wage mean may drift slightly over
+  many fire+replace cycles (bounded by sampling variance, documented in README).
 """
 from dataclasses import dataclass
 
@@ -41,16 +59,14 @@ def sample_workforce(
 ) -> Workforce:
     """Sample a new workforce of K workers.
 
-    sigma==0 short-circuit (D-08): when sigma_theta==0, theta is exactly ones
-    (no rng draw). When sigma_w==0, wage is exactly w * theta**corr_w_theta (no
-    rng draw). This eliminates numpy-version dependency and avoids rng state
-    consumption when sigma==0, preserving Phase 1 byte-parity.
+    Stage 5 mean-preserving wage formula:
+      wage = w * (theta^c / mean(theta^c)) * exp(eps - sigma_w^2/2)
+      where c = corr_w_theta, eps ~ Normal(0, sigma_w).
+    Degenerate path (sigma_theta==0 AND sigma_w==0): returns wage = w exactly.
 
-    Degenerate-parity contract (R-01):
-      sigma_theta==0 AND sigma_w==0 → theta==np.ones(K) EXACTLY, wage==np.full(K, w) EXACTLY.
-      (1.0 ** corr_w_theta == 1.0 guaranteed; exp path not taken.)
-
-    Numeraire contract (R-02): wage = w * f(theta) * exp(eps) is multiplicative in w.
+    D-08 short-circuit: when sigma_theta==0, theta is exactly ones (no rng draw).
+    When sigma_w==0 AND sigma_theta==0, wage is exactly w (no rng draw).
+    When sigma_w==0 AND sigma_theta>0, wage = w * tilt (no eps draw).
     """
     if params.sigma_theta == 0.0:
         theta = np.ones(K, dtype=np.float64)
@@ -61,12 +77,18 @@ def sample_workforce(
             params.theta_max,
         ).astype(np.float64)
 
-    if params.sigma_w == 0.0:
-        wage = params.w * (theta ** params.corr_w_theta)
+    # Stage 5 D-02: mean-preserving wage formula
+    if params.sigma_theta == 0.0 and params.sigma_w == 0.0:
+        # Degenerate path: byte-equal to Stage-1 sigma=0 contract
+        wage = np.full(K, params.w, dtype=np.float64)
     else:
-        wage = params.w * (theta ** params.corr_w_theta) * np.exp(
-            rng.normal(0.0, params.sigma_w, size=K)
-        )
+        theta_pow = theta ** params.corr_w_theta
+        tilt = theta_pow / theta_pow.mean()  # sample-mean normalization
+        if params.sigma_w == 0.0:
+            wage = params.w * tilt
+        else:
+            eps = rng.normal(0.0, params.sigma_w, size=K)
+            wage = params.w * tilt * np.exp(eps - 0.5 * params.sigma_w ** 2)
 
     return Workforce(
         theta=theta,
