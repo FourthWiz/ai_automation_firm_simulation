@@ -50,6 +50,9 @@ class FirmParams:
     firing_threshold: float = 0.0  # fire workers with surplus < firing_threshold
                                     # (defaults to 0.0 = fire negative-surplus workers)
 
+    # Phase 1.5 Stage 6 — opt-in post-firing rehire to K_target = K0
+    enable_hiring: bool = False
+
     # Training delay (Phase 1.5 Stage 6 — dormant by default)
     enable_training_delay: bool = False  # when True, H->A workers produce as H for 1 period before aug kicks in
 

@@ -32,6 +32,13 @@ Phase 1.5 Stage 3 additions:
 Phase 1.5 Stage 5 additions:
   - apply_firings_and_replace replaced by apply_firings (K may shrink; no auto-replace).
   - Step 2.5 (kernel-side clamp, D-06): AFTER step 2 prev_modes capture, BEFORE step 3
+
+Phase 1.5 Stage 6 additions:
+  - Step 0.5 (opt-in hire-back): when enable_hiring=True and firings occurred, calls
+    replace_to_target(firm, firm.K0, t, output_per_worker) to restore workforce.K to K0.
+    Replacement workers are fresh draws (new theta/wage); period_hire_cost = c_hire * n_hired.
+  - History gains n_hired column (int, 0 when enable_hiring=False).
+  - firm.K0: initial headcount captured once in make_firm; never mutated by reset().
     compute_adj_cost. Demotes excess H/A tasks to T when n_HA > workforce.K * tpw.
     Ensures every downstream callsite (compute_adj_cost → count_workers_entering_a_first_time
     → task_to_worker_map) sees capacity-consistent modes. See D-13 for adj_cost semantics.
@@ -47,7 +54,7 @@ import pandas as pd
 from firm_ai_abm.adjustment import adj_cost as compute_adj_cost
 from firm_ai_abm.firm import Firm
 from firm_ai_abm.production import compute_K, productivity_vec, cost_vec
-from firm_ai_abm.review import apply_firings, firing_review
+from firm_ai_abm.review import apply_firings, firing_review, replace_to_target
 from firm_ai_abm.workers import task_to_worker_map
 
 
@@ -84,6 +91,23 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
             firm.workforce, output_per_worker = apply_firings(
                 firm, fire_indices, t, output_per_worker
             )
+
+        # -------------------------------------------------------------------
+        # Step 0.5: opt-in hire-back to K0 (same period, after apply_firings)
+        # -------------------------------------------------------------------
+        n_hired_period = 0
+        period_hire_cost = 0.0
+        if params.enable_hiring and n_review_fired_period > 0:
+            # replace_to_target draws FRESH workers via sample_workforce (new theta and
+            # wage draws from the same distribution as the initial workforce). Hired
+            # workers are NOT the same individuals who were fired. Wage mean can drift
+            # over many fire+rehire cycles per workers.py drift semantics.
+            K_before_hire = firm.workforce.K
+            firm.workforce, output_per_worker = replace_to_target(
+                firm, firm.K0, t, output_per_worker
+            )
+            n_hired_period = firm.workforce.K - K_before_hire
+            period_hire_cost = float(params.c_hire) * n_hired_period
 
         # -------------------------------------------------------------------
         # Step 1: strategy proposes new modes
@@ -163,7 +187,7 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
         wage_bill = float(firm.workforce.wage[active].sum()) if active.size > 0 else 0.0
 
         # Steps 9-10: total cost and profit
-        C = task_costs + wage_bill + params.F + period_adj + period_review_fire_cost
+        C = task_costs + wage_bill + params.F + period_adj + period_review_fire_cost + period_hire_cost
         pi = params.p * Y - C
 
         # Step 11: append to local history (NOT firm.history)
@@ -184,6 +208,7 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
             "n_a_trained": int(firm.workforce.a_trained.sum()),
             "n_review_fired": n_review_fired_period,
             "c_train_lost": c_train_lost_period,
+            "n_hired": n_hired_period,
         })
 
         # -------------------------------------------------------------------
@@ -218,6 +243,15 @@ def run_simulation(firm: Firm, strategy: Callable, T: int | None = None) -> pd.D
           - period_review_fire_cost = c_fire * len(fire_indices)
         Else: period_review_fire_cost = 0.0; n_review_fired = 0; c_train_lost = 0.0
 
+      Step 0.5 (Stage 6, opt-in):
+        If enable_hiring AND n_review_fired > 0:
+          - replace_to_target(firm, firm.K0, t, output_per_worker) — restores workforce.K
+            to K0 using fresh worker draws (new theta/wage from same distribution).
+          - period_hire_cost = c_hire * n_hired
+        Else: period_hire_cost = 0.0; n_hired = 0
+        NOTE: replacement workers are NOT the same individuals fired; wage mean can drift
+        over many fire+rehire cycles.
+
       Step 1: new_modes = strategy(firm, t)
       Step 2: prev_modes = firm.modes.copy()   (capture AFTER strategy, BEFORE install)
       Step 2b: assert prev_modes == firm.modes (eager contract: strategy must not mutate)
@@ -232,7 +266,7 @@ def run_simulation(firm: Firm, strategy: Callable, T: int | None = None) -> pd.D
               in output_per_worker[t, :workforce.K]
       Step 7: task_costs = cost_vec(...).sum()
       Step 8: wage_bill = sum of wages for ASSIGNED workers only (D-03)
-      Step 9: C = task_costs + wage_bill + F + period_adj + period_review_fire_cost
+      Step 9: C = task_costs + wage_bill + F + period_adj + period_review_fire_cost + period_hire_cost
       Step 10: pi = p * Y - C
       Step 11: append row to firm.history (includes n_review_fired, c_train_lost)
       Step 11.5 (Stage 3, D-06): workforce.tenure += 1 for ALL workers
@@ -252,6 +286,7 @@ def run_simulation(firm: Firm, strategy: Callable, T: int | None = None) -> pd.D
         n_review_fired: int count of workers fired by the periodic review this period.
         c_train_lost: float value of trained capital lost due to review firings this
         period (diagnostic metric only — NOT included in C or pi, D-08).
+        n_hired: int count of workers hired back this period (0 when enable_hiring=False).
 
     Side effect (Stage 3):
         After the loop completes, attaches `firm.output_per_worker` (shape T × K_max,

@@ -94,6 +94,8 @@ UNSCALED_PARAMS: tuple[str, ...] = (
     "margin_horizon",
     # target_margin is a ratio (dimensionless), not monetary — stays UNSCALED
     "target_margin",
+    # Phase 1.5 Stage 6: enable_hiring is a boolean flag (not monetary)
+    "enable_hiring",
 )
 
 

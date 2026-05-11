@@ -133,7 +133,7 @@ def test_T08_firing_review_T_review_inf_returns_empty():
 
 
 def test_T09_surplus_calculation_correctness():
-    """Surplus = mean_output - wage; firing depends on threshold."""
+    """Surplus = p * mean_output − wage (test uses p=1.0 so numerically equivalent to old formula, but verifies price-scaled formula is in place); firing depends on threshold."""
     params_base = _default_params(T_review=10.0)
     wf = _make_fake_workforce(theta=[1.0, 1.0], wage=[2.0, 0.5])
 
@@ -650,3 +650,136 @@ def test_T17_greedy_gaming_smoke_no_firing_cascade():
     assert float(df_gs["pi"].iloc[-1]) > 0, (
         f"greedy_with_switching unprofitable at final period: pi={df_gs['pi'].iloc[-1]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# T-04: Regression test — low-p scenario fires workers post-fix (BUG-1)
+# ---------------------------------------------------------------------------
+
+
+def test_low_price_triggers_firings():
+    """BUG-1 regression: post-fix surplus = p * mean_output - wage fires workers at low p.
+
+    Uses all_H strategy (not greedy_profit — greedy switches to augmented mode at p=0.22,
+    yielding p * output >> wage even post-fix, so no firings would occur with greedy).
+    With all_H: H-mode output per worker ≈ q_h * tpw * theta = 5 * theta.
+    Post-fix surplus = p * 5 * theta - wage = 1.1 * theta - wage.
+    For low-theta workers (theta < ~0.9), wage > 1.1 * theta → surplus < 0 → fired.
+
+    Pre-fix (bug): surplus = mean_output - wage = 5*theta - wage > 0 for all workers → 0 firings.
+    Post-fix: firings > 0 because some workers have p * output < wage.
+    """
+    # Post-fix: firings occur at p=0.22 all_H because low-theta workers have p*output < wage
+    params = FirmParams(
+        N=100, T=60, tasks_per_worker=5,
+        T_review=10.0, firing_threshold=0.0,
+        p=0.22, seed=0,
+        sigma_theta=0.2, sigma_w=0.05,
+    )
+    firm = make_firm(params)
+    df = run_simulation(firm, all_H)
+
+    total_fired = int(df["n_review_fired"].sum())
+
+    assert total_fired > 0, (
+        f"BUG-1 regression: expected firings > 0 at p=0.22 all_H with sigma_theta=0.2, "
+        f"got {total_fired}. The price factor (params.p) may be missing from surplus formula."
+    )
+
+
+# ---------------------------------------------------------------------------
+# T-06: Hiring-enabled smoke test
+# ---------------------------------------------------------------------------
+
+
+def test_enable_hiring_restores_headcount():
+    """Smoke test: enable_hiring=True restores firm.workforce.K to K0 after firings.
+
+    Uses all_H strategy (same reasoning as test_low_price_triggers_firings):
+    greedy_profit picks augmented mode at p=0.22, giving surplus > 0 → no firings.
+    Recipe: same as test_low_price_triggers_firings plus enable_hiring=True.
+    Assertions:
+      - n_hired sum > 0 (hires occurred)
+      - firm.workforce.K == firm.K0 after run (headcount restored)
+      - pi shows no runaway negative cost (sanity)
+    """
+    params = FirmParams(
+        N=100, T=60, tasks_per_worker=5,
+        T_review=10.0, firing_threshold=0.0,
+        p=0.22, seed=0,
+        sigma_theta=0.2, sigma_w=0.05,
+        enable_hiring=True,
+    )
+    firm = make_firm(params)
+    K0 = firm.K0
+    df = run_simulation(firm, all_H)
+
+    assert int(df["n_hired"].sum()) > 0, (
+        "enable_hiring=True with low p should produce hires; got 0"
+    )
+
+    # Headcount is restored: firm.workforce.K should equal K0 at end of run
+    assert firm.workforce.K == K0, (
+        f"workforce.K={firm.workforce.K} after run with enable_hiring, expected K0={K0}"
+    )
+
+    # Sanity: pi shows no runaway negative cost (very loose bound)
+    assert df["pi"].min() > -10 * params.c_hire * K0, (
+        f"pi min {df['pi'].min():.2f} too negative for hire costs"
+    )
+
+
+# ---------------------------------------------------------------------------
+# T-07: Numeraire-invariance with low p (T-16b)
+# ---------------------------------------------------------------------------
+
+
+def test_T16b_numeraire_with_low_p():
+    """Numeraire invariance holds with p=0.5 (and 2*p=1.0 for the scaled side).
+
+    Confirms params.p * mean_output - wage scales linearly with monetary doubling.
+    Post-fix: surplus = p * mean_output - wage. Under monetary doubling (all monetary
+    params × 2, including p), surplus × 2 → same fire_mask → pi × 2.
+    """
+    params_base = FirmParams(
+        seed=0,
+        sigma_theta=0.0,
+        sigma_w=0.0,
+        T=20,
+        T_review=10.0,
+        firing_threshold=0.0,
+        tasks_per_worker=10,
+        p=0.5,
+    )
+
+    SCALED = ("w", "c_aug", "c_auto", "c_fire", "c_hire", "c_train", "F", "p")
+    scaled_kwargs = {f: getattr(params_base, f) * 2.0 for f in SCALED}
+    params_scaled = replace(params_base, **scaled_kwargs)
+
+    strategies = [all_H, all_A]
+
+    for strat in strategies:
+        name = strat.__name__
+
+        firm_base = make_firm(params_base)
+        df_base = run_simulation(firm_base, strat)
+
+        firm_scaled = make_firm(params_scaled)
+        df_scaled = run_simulation(firm_scaled, strat)
+
+        assert np.allclose(
+            df_scaled["pi"].values,
+            2.0 * df_base["pi"].values,
+            rtol=1e-10,
+            atol=1e-9,
+        ), (
+            f"T-16b numeraire invariance failed for {name} at p=0.5: "
+            f"max dev = {np.max(np.abs(df_scaled['pi'].values - 2.0 * df_base['pi'].values))}"
+        )
+
+        assert np.array_equal(
+            df_scaled["n_review_fired"].values,
+            df_base["n_review_fired"].values,
+        ), (
+            f"T-16b n_review_fired differs at p=0.5 for {name}"
+        )
