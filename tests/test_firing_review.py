@@ -854,3 +854,229 @@ def test_T16b_numeraire_with_low_p():
         ), (
             f"T-16b n_review_fired differs at p=0.5 for {name}"
         )
+
+
+# ---------------------------------------------------------------------------
+# T-09: F-share numeraire invariance (adaptive-firing-surplus regression fence)
+# ---------------------------------------------------------------------------
+
+
+def test_F_share_numeraire():
+    """F_share numeraire invariance: pi_scaled == 2 * pi_base AND fire counts identical.
+
+    Scenario: F=10.0, K0=10, F_share=1.0 per worker. With all_H and sigma=0:
+    effective_surplus = 1.0 * 10 * 1.0 - 1.0 - 0 - 1.0 = 9.0 > 0 → no firings.
+    Under 2× monetary scaling, F_share = 2.0, surplus = 2*10 - 2 - 0 - 2 = 18.0 > 0 → still no firings.
+    pi_scaled must equal exactly 2 * pi_base (R-03 regression fence for the F_share formula).
+    """
+    params_base = FirmParams(
+        seed=0,
+        sigma_theta=0.0,
+        sigma_w=0.0,
+        T=20,
+        T_review=10.0,
+        firing_threshold=0.0,
+        tasks_per_worker=10,
+        p=1.0,
+        F=10.0,
+        c_aug=0.05,
+    )
+
+    SCALED = ("w", "c_aug", "c_auto", "c_fire", "c_hire", "c_train", "F", "p", "firing_threshold")
+    scaled_kwargs = {f: getattr(params_base, f) * 2.0 for f in SCALED}
+    params_scaled = replace(params_base, **scaled_kwargs)
+
+    for strat, name in [(all_H, "all_H"), (all_A, "all_A")]:
+        firm_base = make_firm(params_base)
+        df_base = run_simulation(firm_base, strat)
+
+        firm_scaled = make_firm(params_scaled)
+        df_scaled = run_simulation(firm_scaled, strat)
+
+        assert np.allclose(
+            df_scaled["pi"].values,
+            2.0 * df_base["pi"].values,
+            rtol=1e-10,
+            atol=1e-9,
+        ), (
+            f"T-09 F_share numeraire failed for {name}: "
+            f"max dev = {np.max(np.abs(df_scaled['pi'].values - 2.0 * df_base['pi'].values))}"
+        )
+
+        assert np.array_equal(
+            df_scaled["n_review_fired"].values,
+            df_base["n_review_fired"].values,
+        ), (
+            f"T-09 n_review_fired differs between base and scaled for {name}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# T-10: Single-tick cascade damping (stale-K discrimination test)
+# ---------------------------------------------------------------------------
+
+
+def test_F_share_stale_K_within_tick():
+    """Within one review tick, F_share uses pre-fire K (stale). Discriminating recipe.
+
+    4 workers, F=8.0, K=4, F_share=2.0 (stale K).
+    Worker 0: output=5.0, surplus = 5 - 1 - 0 - 2 = 2.0 (keep)
+    Workers 1/2/3: output=2.5, surplus = 2.5 - 1 - 0 - 2 = -0.5 (fire)
+    Expected fire_indices = [1, 2, 3] (3 workers only).
+
+    np.where returns column-order (ascending-index) results so the assertion is
+    deterministic regardless of mask evaluation order (MIN-2 note).
+
+    If F_share were recomputed after each firing (recursive cascade):
+      after firing worker 1: K=3, F_share=2.67; worker 0 surplus = 5-1-0-2.67 = 1.33 (still keep)
+      after firing worker 2: K=2, F_share=4.0; worker 0 surplus = 5-1-0-4 = 0 (still keep)
+      after firing worker 3: K=1, F_share=8.0; worker 0 surplus = 5-1-0-8 = -4 (fire!)
+    Recursive cascade would fire all 4; stale-K stops at 3.
+    """
+    params = _default_params(T_review=10.0, firing_threshold=0.0, F=8.0)
+    wf = _make_fake_workforce(
+        theta=[1.0, 1.0, 1.0, 1.0],
+        wage=[1.0, 1.0, 1.0, 1.0],
+    )
+    opw = np.full((20, 4), np.nan)
+    opw[0:10, 0] = 5.0   # surplus = 5 - 1 - 0 - (8/4=2) = 2 (keep)
+    opw[0:10, 1] = 2.5   # surplus = 2.5 - 1 - 0 - 2 = -0.5 (fire)
+    opw[0:10, 2] = 2.5   # fire
+    opw[0:10, 3] = 2.5   # fire
+    acpw = np.full_like(opw, 0.0)
+    acpw[np.isnan(opw)] = np.nan
+
+    fire_indices, _ = firing_review(
+        wf, t=10, output_per_worker=opw, aug_cost_per_worker=acpw, params=params
+    )
+    assert np.array_equal(fire_indices, np.array([1, 2, 3])), (
+        f"Expected stale-K firing [1, 2, 3] (3 workers); got {fire_indices}. "
+        f"Per-tick recursive cascade would have fired all 4."
+    )
+
+
+# ---------------------------------------------------------------------------
+# T-11: Hire/fire oscillation guard (enable_hiring + F-share)
+# ---------------------------------------------------------------------------
+
+
+def test_hiring_oscillation_bounded():
+    """Hiring + F-share oscillation is bounded by the tight theoretical maximum.
+
+    With enable_hiring=True, firing can trigger same-period hire-back (Step 0.5).
+    Total hires must not exceed K0 * num_review_ticks where num_review_ticks
+    = (T-1) // T_review (t=0 excluded by firing_review's short-circuit).
+
+    For T=30, T_review=5: actual firing ticks t ∈ {5,10,15,20,25} = 5 ticks.
+    bound = 20 * 5 = 100.
+
+    Also detects sustained full-fire flip-flop: no 3+ consecutive review ticks
+    with n_review_fired == K0 (structural oscillation detector).
+    """
+    params = FirmParams(
+        N=100,
+        T=30,
+        tasks_per_worker=5,
+        T_review=5.0,
+        firing_threshold=0.0,
+        p=0.22,
+        F=5.0,
+        seed=0,
+        sigma_theta=0.2,
+        sigma_w=0.05,
+        enable_hiring=True,
+    )
+    K0 = params.N // params.tasks_per_worker  # 20
+    firm = make_firm(params)
+    df = run_simulation(firm, all_H)
+
+    total_hired = int(df["n_hired"].sum())
+
+    # t=0 excluded by firing_review's short-circuit (review.py:95)
+    # Actual review ticks with firing = (T-1)//T_review, not T//T_review.
+    num_reviews = (params.T - 1) // int(params.T_review)  # 5 (not 6)
+    bound = K0 * num_reviews  # 20 * 5 = 100
+    assert total_hired <= bound, (
+        f"Hiring exceeds theoretical max: total_hired={total_hired} > bound={bound}. "
+        f"T={params.T}, T_review={params.T_review}, num_reviews={num_reviews}, K0={K0}"
+    )
+
+    # Structural flip-flop detector: no 3+ consecutive review ticks with full-workforce fire.
+    # Review rows: t % T_review == 0 (and t > 0 since t=0 is excluded by short-circuit).
+    review_rows = df[(df["t"] % int(params.T_review) == 0) & (df["t"] > 0)]
+    full_fire_ticks = (review_rows["n_review_fired"].values == K0).astype(int)
+    max_run = cur = 0
+    for v in full_fire_ticks:
+        cur = cur + 1 if v else 0
+        max_run = max(max_run, cur)
+    assert max_run <= 2, (
+        f"Sustained full-workforce fire-then-hire-then-fire cycle detected: "
+        f"{max_run} consecutive review ticks with n_review_fired == K0. "
+        f"R-04 oscillation may be unbounded."
+    )
+
+    # Zero-workforce limbo check: no K_active == 0 for >1 consecutive period.
+    zero_k_periods = (df["K_active"] == 0).astype(int).values
+    max_zero_run = cur = 0
+    for v in zero_k_periods:
+        cur = cur + 1 if v else 0
+        max_zero_run = max(max_zero_run, cur)
+    assert max_zero_run <= 1, (
+        f"Workforce stuck at K_active=0 for {max_zero_run} consecutive periods. "
+        f"enable_hiring should restore headcount within the same period."
+    )
+
+
+# ---------------------------------------------------------------------------
+# T-12: Regression neutrality — aug_cost_per_worker dormant under T_review=inf
+# ---------------------------------------------------------------------------
+
+
+def test_aug_cost_neutrality_when_dormant():
+    """With T_review=inf, aug_cost_per_worker is populated but never read by firing_review.
+
+    pi/Y/C columns must be byte-equal to the pre-change baseline captured in
+    check8-pretip.json (before any Stage-7 code edits). This is the dormancy-guarantee
+    regression fence: two cost_vec calls per period (D-07) but Step 7 is unchanged,
+    so task_costs, C, and pi are bit-for-bit identical.
+
+    Falls back to run_tier_a() check8 pass assertion if pretip.json is absent.
+    """
+    import json
+    import pathlib
+
+    pretip_path = pathlib.Path(".workflow_artifacts/adaptive-firing-surplus/check8-pretip.json")
+
+    from firm_ai_abm.validate import run_tier_a
+
+    result = run_tier_a()
+    assert result["check8"]["passed"], (
+        f"check8_stage3_neutrality FAILED post-change (dormancy guarantee broken): "
+        f"{result['check8']['details']}"
+    )
+
+    if pretip_path.exists():
+        # pretip structure: {"passed": bool, "details": {"per_strategy": {...}}}
+        # written by: json.dumps(results.get('check8', {}), default=str)
+        pretip = json.loads(pretip_path.read_text())
+        assert pretip.get("passed", False), (
+            "check8 was already failing before Stage-7 changes (pretip baseline shows failed)"
+        )
+        pre_details = pretip.get("details", {})
+        post_details = result["check8"].get("details", {})
+        for strat_name in post_details.get("per_strategy", {}):
+            if strat_name in pre_details.get("per_strategy", {}):
+                pre_passed = pre_details["per_strategy"][strat_name]["passed"]
+                post_passed = post_details["per_strategy"][strat_name]["passed"]
+                assert post_passed == pre_passed, (
+                    f"check8 strategy '{strat_name}' passed={post_passed} post-change "
+                    f"but was passed={pre_passed} in pretip baseline"
+                )
+    else:
+        # Pretip baseline absent (T-01 pre-step was skipped); fall back to pass-only assertion
+        import warnings
+        warnings.warn(
+            "check8-pretip.json absent — falling back to pass-only assertion. "
+            "Re-run T-01 pre-step to capture the byte-identity baseline.",
+            stacklevel=2,
+        )

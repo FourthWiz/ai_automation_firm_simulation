@@ -11,8 +11,9 @@ simulate.run_simulation as ``w * K`` (architecture D-01). cost_vec does NOT
 include wages; this is load-bearing for check3, check4, and check5 correctness.
 
 Numeraire scope:
-- SCALED_PARAMS (8 fields): the monetary parameters that scale profit linearly.
-- UNSCALED_PARAMS (8 fields): productivity scalars, counts, and the seed.
+- SCALED_PARAMS (9 fields): the monetary parameters that scale profit linearly.
+  firing_threshold added in Phase 1.5 Stage 7 (adaptive-firing-surplus).
+- UNSCALED_PARAMS (15 fields): productivity scalars, counts, and the seed.
   These two tuples partition dataclasses.fields(FirmParams) exactly (no overlap,
   no missing field). An in-code assertion in check5_numeraire enforces this
   contract; any future FirmParams field addition will raise immediately on
@@ -654,6 +655,77 @@ def check9_numeraire_with_firing_active(firm_factory) -> tuple[bool, dict]:
 
 
 # ---------------------------------------------------------------------------
+# Check 10: adaptive-firing surplus numeraire invariance (Stage 7)
+# ---------------------------------------------------------------------------
+
+
+def check10_adaptive_firing_numeraire(firm_factory) -> tuple[bool, dict]:
+    """Check 10: numeraire invariance holds with four-term surplus and active firing.
+
+    Tests two scenarios:
+    (a) firing_threshold=0.0 — at default-ish params (p=0.22, tpw=5, sigma=0),
+        all H-mode workers have surplus = 0.22*5 - 1.0 - 0 - 5/20 = -0.15 < 0 →
+        all workers fire at every review tick. Verifies that pi_scaled == 2*pi_base
+        and n_review_fired is identical between base and scaled run.
+    (b) firing_threshold=0.05 — same structure; scaled threshold = 0.10 (firing_threshold
+        now in SCALED_PARAMS after Stage 7). Fire mask is identical because
+        surplus × 2 and threshold × 2 preserve the inequality direction.
+
+    Validates both: (i) the four-term surplus formula scales linearly under monetary
+    doubling; (ii) reclassifying firing_threshold as SCALED doesn't break invariance.
+    """
+    from dataclasses import replace as _replace
+
+    all_passed = True
+    per_variant: dict[str, dict] = {}
+
+    for label, threshold in [("threshold_0", 0.0), ("threshold_005", 0.05)]:
+        params_base = FirmParams(
+            seed=0,
+            sigma_theta=0.0,
+            sigma_w=0.0,
+            T=20,
+            T_review=10.0,
+            firing_threshold=threshold,
+            tasks_per_worker=5,
+            p=0.22,
+        )
+        scaled_kwargs = {f: getattr(params_base, f) * 2.0 for f in SCALED_PARAMS}
+        params_scaled = _replace(params_base, **scaled_kwargs)
+
+        firm_base = make_firm(params_base)
+        df_base = run_simulation(firm_base, all_H)
+        pi_base = df_base["pi"].values
+
+        firm_scaled = make_firm(params_scaled)
+        df_scaled = run_simulation(firm_scaled, all_H)
+        pi_scaled = df_scaled["pi"].values
+
+        numeraire_ok = bool(np.allclose(pi_scaled, 2.0 * pi_base, rtol=1e-10, atol=1e-9))
+        max_dev = float(np.max(np.abs(pi_scaled - 2.0 * pi_base)))
+
+        fired_base = df_base["n_review_fired"].values
+        fired_scaled = df_scaled["n_review_fired"].values
+        fire_mask_ok = bool(np.array_equal(fired_base, fired_scaled))
+
+        # Verify firings actually occurred (formula is exercised, not dormant)
+        any_firings = bool(df_base["n_review_fired"].sum() > 0)
+
+        variant_passed = numeraire_ok and fire_mask_ok and any_firings
+        all_passed = all_passed and variant_passed
+        per_variant[label] = {
+            "passed": variant_passed,
+            "numeraire_ok": numeraire_ok,
+            "fire_mask_ok": fire_mask_ok,
+            "any_firings": any_firings,
+            "max_pi_dev": max_dev,
+            "n_review_fired_base": int(df_base["n_review_fired"].sum()),
+        }
+
+    return all_passed, {"per_variant": per_variant}
+
+
+# ---------------------------------------------------------------------------
 # Tier A aggregator
 # ---------------------------------------------------------------------------
 
@@ -664,7 +736,8 @@ def run_tier_a(firm_factory=None) -> dict:
     Tier A checks: check1 (constant baseline), check3 (monotonicity in q_a),
     check4 (monotonicity in w), check5 (numeraire invariance), check7 (Phase 1
     degenerate parity), check8 (Stage 3 T_review=inf neutrality), check9
-    (numeraire with firing active, Stage 5).
+    (numeraire with firing active, Stage 5), check10 (adaptive-firing surplus
+    numeraire, Stage 7 — four-term formula + firing_threshold in SCALED_PARAMS).
     Checks 2 and 6 (greedy dominance and adjustment-cost integration) are Tier B.
 
     Args:
@@ -675,7 +748,7 @@ def run_tier_a(firm_factory=None) -> dict:
 
     Returns:
         dict with keys: "check1", "check3", "check4", "check5", "check7", "check8",
-        "check9", "all_passed". Each check value is {"passed": bool, "details": dict}.
+        "check9", "check10", "all_passed". Each check value is {"passed": bool, "details": dict}.
         Does NOT raise on failure — returns the dict so the driver can render a
         full report showing which checks failed and why.
 
@@ -695,12 +768,13 @@ def run_tier_a(firm_factory=None) -> dict:
         ("check7", check7_phase1_parity),
         ("check8", check8_stage3_neutrality),
         ("check9", check9_numeraire_with_firing_active),
+        ("check10", check10_adaptive_firing_numeraire),
     ]:
         passed, details = check_fn(firm_factory)
         results[check_name] = {"passed": passed, "details": details}
 
     results["all_passed"] = all(
-        results[k]["passed"] for k in ("check1", "check3", "check4", "check5", "check7", "check8", "check9")
+        results[k]["passed"] for k in ("check1", "check3", "check4", "check5", "check7", "check8", "check9", "check10")
     )
 
     return results
