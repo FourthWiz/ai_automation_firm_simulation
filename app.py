@@ -369,7 +369,7 @@ def main() -> None:
 
     row4_left, row4_right = st.columns(2)
     with row4_left:
-        st.pyplot(fig_firing_events(df))
+        st.pyplot(fig_firing_events(df, T_review=float(active_key[20])))
     with row4_right:
         st.pyplot(fig_trained_capital(df))
 

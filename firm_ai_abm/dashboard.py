@@ -10,6 +10,8 @@ Color scheme for mode-mix plots matches viz.fig3_mode_mix_greedy:
   T (automated): #C44E52 (red/orange)
 """
 
+import math
+
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -47,19 +49,24 @@ def fig_pi_over_time(df: pd.DataFrame) -> matplotlib.figure.Figure:
 
 
 def fig_K_over_time(df: pd.DataFrame) -> matplotlib.figure.Figure:
-    """Worker headcount over time: packed formula (K) vs actual active (K_active).
+    """Worker headcount over time with firing-event overlay.
 
-    K (packed formula) = ceil(n_H_or_A / tasks_per_worker) — underestimates
-    actual paying headcount when H/A tasks are scattered across task slots.
-    K_active = unique workers assigned to at least one H/A task — matches
-    wage_bill exactly. When N is small relative to tasks_per_worker the two
-    lines coincide; for large N they diverge and K_active is the correct count.
+    K (packed formula) = ceil(n_H_or_A / tasks_per_worker).
+    K_active = unique workers assigned to at least one H/A task.
+    When firings occur, red bars on the right y-axis show workers fired per
+    review period. K stays constant because fired workers are immediately
+    replaced; the bars reveal when turnover happens.
 
     Input:
-        df: run_simulation DataFrame with columns 't', 'K', 'K_active'.
+        df: run_simulation DataFrame with columns 't', 'K', 'K_active',
+            and optionally 'n_review_fired'.
     Output:
-        Figure with one Axes, two lines. No disk I/O.
+        Figure with one Axes (two lines) and, when firings > 0, a twin
+        right-axis with firing bars. No disk I/O.
     """
+    fired_col = df.get("n_review_fired", pd.Series(0, index=df.index))
+    has_firings = bool((fired_col > 0).any())
+
     fig, ax = plt.subplots(figsize=(5, 3))
     ax.plot(df["t"], df["K_active"], color="#55A868", linewidth=1.5, label="K_active (actual)")
     ax.plot(df["t"], df["K"], color="#4C72B0", linewidth=1.0, linestyle="--", label="K (packed formula)")
@@ -67,8 +74,22 @@ def fig_K_over_time(df: pd.DataFrame) -> matplotlib.figure.Figure:
     ax.set_xlabel("period")
     ax.set_ylabel("workers")
     ax.set_title("Active Workers Over Time")
-    ax.legend(fontsize=7, frameon=False)
     ax.grid(alpha=0.3)
+
+    if has_firings:
+        ax2 = ax.twinx()
+        mask = fired_col > 0
+        ax2.bar(df["t"][mask], fired_col[mask], color="#C44E52", alpha=0.4,
+                width=0.8, label="fired")
+        ax2.set_ylabel("workers fired", color="#C44E52")
+        ax2.tick_params(axis="y", labelcolor="#C44E52")
+        ax2.yaxis.set_major_locator(matplotlib.ticker.MaxNLocator(integer=True))
+        lines1, labels1 = ax.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax.legend(lines1 + lines2, labels1 + labels2, fontsize=7, frameon=False)
+    else:
+        ax.legend(fontsize=7, frameon=False)
+
     fig.tight_layout()
     return fig
 
@@ -183,20 +204,23 @@ def fig_mean_theta_over_time(df: pd.DataFrame) -> matplotlib.figure.Figure:
     return fig
 
 
-def fig_firing_events(df: pd.DataFrame) -> matplotlib.figure.Figure:
+def fig_firing_events(df: pd.DataFrame, T_review: float = math.inf) -> matplotlib.figure.Figure:
     """Firing events at review periods.
 
     Input:
         df: run_simulation DataFrame with columns 't' (int) and
             'n_review_fired' (int, workers fired at this period's review;
             0 for non-review periods). Shape: (T, 13+).
+        T_review: the T_review parameter used for the run (default math.inf).
+            Used only to distinguish "review disabled" from "review active
+            but no workers met the firing threshold" in the fallback message.
     Output:
         Figure with one Axes: scatter of t values where n_review_fired > 0,
         marker size proportional to count (markersize = 40 * count / max_count,
         minimum 40). Baseline at y=0 via axhline. Only firing periods have
         markers; non-review or zero-fired periods have none.
-        If no firings occurred (all-T strategy, T_review=inf), the plot
-        renders an empty scatter with the baseline line and a text note.
+        If no firings occurred, the plot renders an empty scatter with the
+        baseline line and a context-aware text note.
     Color: markers in #C44E52 (red).
     No disk I/O — returns Figure only.
     """
@@ -215,7 +239,11 @@ def fig_firing_events(df: pd.DataFrame) -> matplotlib.figure.Figure:
                    zorder=3, label="workers fired")
         ax.legend(frameon=False, fontsize=8)
     else:
-        ax.text(0.5, 0.5, "no firing events\n(T_review=inf or no firings)",
+        if math.isinf(T_review):
+            msg = "review disabled\n(T_review=∞)"
+        else:
+            msg = f"no firings at this threshold\n(T_review={int(T_review)}, raise firing_threshold)"
+        ax.text(0.5, 0.5, msg,
                 transform=ax.transAxes, ha="center", va="center",
                 fontsize=9, color="gray")
 
