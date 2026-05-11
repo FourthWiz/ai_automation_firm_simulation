@@ -570,6 +570,80 @@ def check8_stage3_neutrality(firm_factory) -> tuple[bool, dict]:
 
 
 # ---------------------------------------------------------------------------
+# Check 9: numeraire invariance with firing review ACTIVE (Stage 5 T-11)
+# ---------------------------------------------------------------------------
+
+
+def check9_numeraire_with_firing_active(firm_factory) -> tuple[bool, dict]:
+    """Check 9: numeraire invariance holds even when firing review is active.
+
+    Uses sigma_theta=0, sigma_w=0, T_review=10, firing_threshold=0.0.
+    Per D-11: at these params, surplus = mean_output - wage. With all_H,
+    output = q_h * tasks_per_worker = 10.0, wage = w = 1.0 → surplus = 9.0 > 0.
+    No workers fire. Numeraire holds trivially (no firing-set change under scaling).
+    Additionally asserts adj_cost_base == 0 for the first period (no mode transitions
+    at t=0 — strategy proposes same all_H modes as initial state; clamp is never active).
+
+    Returns:
+        (passed, details) where details contains per-strategy results and the adj_cost=0 assertion.
+    """
+    from dataclasses import replace as _replace
+
+    params_base = FirmParams(
+        seed=0,
+        sigma_theta=0.0,
+        sigma_w=0.0,
+        T=20,
+        T_review=10.0,
+        firing_threshold=0.0,
+    )
+    scaled_kwargs = {f: getattr(params_base, f) * 2.0 for f in SCALED_PARAMS}
+    params_scaled = _replace(params_base, **scaled_kwargs)
+
+    strategies = [
+        ("all_H", all_H),
+        ("all_A", all_A),
+    ]
+
+    per_strategy: dict[str, dict] = {}
+    all_passed = True
+
+    for strat_name, strat in strategies:
+        firm_base = make_firm(params_base)
+        df_base = run_simulation(firm_base, strat)
+        pi_base = df_base["pi"].values
+
+        firm_scaled = make_firm(params_scaled)
+        df_scaled = run_simulation(firm_scaled, strat)
+        pi_scaled = df_scaled["pi"].values
+
+        numeraire_ok = bool(np.allclose(pi_scaled, 2.0 * pi_base, rtol=1e-10, atol=1e-9))
+        max_dev = float(np.max(np.abs(pi_scaled - 2.0 * pi_base)))
+
+        # adj_cost=0 at t=0 for all_H only: all_H proposes H from initial all-H state → no
+        # mode transition → adj_cost=0. all_A switches H→A at t=0 → adj_cost > 0 (expected).
+        adj_cost_base_t0 = float(df_base["adj_cost"].iloc[0])
+        adj_cost_ok = (strat_name != "all_H") or (adj_cost_base_t0 == 0.0)
+
+        # n_review_fired should be 0 for all periods (surplus > 0 at sigma=0, firing_threshold=0)
+        no_firings = bool(df_base["n_review_fired"].sum() == 0)
+
+        strat_passed = numeraire_ok and adj_cost_ok and no_firings
+        all_passed = all_passed and strat_passed
+        per_strategy[strat_name] = {
+            "passed": strat_passed,
+            "numeraire_ok": numeraire_ok,
+            "max_pi_dev": max_dev,
+            "adj_cost_base_t0": adj_cost_base_t0,
+            "adj_cost_ok": adj_cost_ok,
+            "no_firings": no_firings,
+            "n_review_fired_sum": int(df_base["n_review_fired"].sum()),
+        }
+
+    return all_passed, {"per_strategy": per_strategy}
+
+
+# ---------------------------------------------------------------------------
 # Tier A aggregator
 # ---------------------------------------------------------------------------
 
@@ -579,7 +653,8 @@ def run_tier_a(firm_factory=None) -> dict:
 
     Tier A checks: check1 (constant baseline), check3 (monotonicity in q_a),
     check4 (monotonicity in w), check5 (numeraire invariance), check7 (Phase 1
-    degenerate parity), check8 (Stage 3 T_review=inf neutrality).
+    degenerate parity), check8 (Stage 3 T_review=inf neutrality), check9
+    (numeraire with firing active, Stage 5).
     Checks 2 and 6 (greedy dominance and adjustment-cost integration) are Tier B.
 
     Args:
@@ -590,7 +665,7 @@ def run_tier_a(firm_factory=None) -> dict:
 
     Returns:
         dict with keys: "check1", "check3", "check4", "check5", "check7", "check8",
-        "all_passed". Each check value is {"passed": bool, "details": dict}.
+        "check9", "all_passed". Each check value is {"passed": bool, "details": dict}.
         Does NOT raise on failure — returns the dict so the driver can render a
         full report showing which checks failed and why.
 
@@ -609,12 +684,13 @@ def run_tier_a(firm_factory=None) -> dict:
         ("check5", check5_numeraire),
         ("check7", check7_phase1_parity),
         ("check8", check8_stage3_neutrality),
+        ("check9", check9_numeraire_with_firing_active),
     ]:
         passed, details = check_fn(firm_factory)
         results[check_name] = {"passed": passed, "details": details}
 
     results["all_passed"] = all(
-        results[k]["passed"] for k in ("check1", "check3", "check4", "check5", "check7", "check8")
+        results[k]["passed"] for k in ("check1", "check3", "check4", "check5", "check7", "check8", "check9")
     )
 
     return results
