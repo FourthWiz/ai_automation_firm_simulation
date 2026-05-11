@@ -62,6 +62,7 @@ SCALED_PARAMS: tuple[str, ...] = (
     "c_train",
     "F",
     "p",
+    "firing_threshold",
 )
 
 # Non-monetary parameters: productivity scalars, counts, seed, heterogeneity shape.
@@ -82,12 +83,11 @@ UNSCALED_PARAMS: tuple[str, ...] = (
     "corr_w_theta",
     "sigma_w",
     # Phase 1.5 Stage 3: periodic firing review shape parameters (not monetary)
-    # T_review: period count (unscaled); firing_threshold: wage-relative at default 0.0
-    # (0.0 is numeraire-invariant: 0.0 * k = 0.0 regardless of scaling factor).
-    # KNOWN LIMITATION: non-zero firing_threshold would be monetary and should be in
-    # SCALED_PARAMS; Stage 3 defers this — only the default 0.0 is safe as UNSCALED.
+    # T_review: period count (unscaled).
+    # firing_threshold: monetary threshold (SCALED — moved to SCALED_PARAMS in Phase 1.5
+    # Stage 7 / adaptive-firing-surplus, because the new formula makes surplus genuinely
+    # monetary: effective_surplus = p*mean_output - wage - mean_aug_cost - F/K_review).
     "T_review",
-    "firing_threshold",
     # Phase 1.5 Stage 6: training delay and margin scenario (not monetary scalars)
     "enable_training_delay",
     "scenario_mode",
