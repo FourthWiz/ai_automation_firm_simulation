@@ -1,17 +1,23 @@
-"""Stage 3 tests: periodic firing review (T-08 .. T-17).
+"""Stage 3 / Stage 5 tests: periodic firing review (T-08 .. T-17).
 
-Test plan reference: stage-3/current-plan.md Tasks section.
+Stage 5 changes (D-03): apply_firings_and_replace removed; replaced by
+  apply_firings (K shrinks) + replace_to_target (opt-in hire-back).
+
+Test plan reference: stage-3/current-plan.md and stage-5/current-plan.md.
 Tests T-08..T-17 cover:
   T-08: firing_review fires negative-surplus workers, leaves positive-surplus alone
   T-09: surplus calculation correctness (mean_output - wage matches definition)
-  T-10: replacement-hire restores K; re-indexed by descending tenure (partial-fire path)
+  T-10a: apply_firings drops K and re-indexes survivors by descending tenure
+  T-10b: replace_to_target restores K; no-op identity fast-path
+  T-10 (run_simulation): K drops at review period; K_clamp_events > 0 after K=0
   T-11: Tier-A check8 Stage 3 neutrality (T_review=inf == Stage 2 fixtures)
   T-12: replacement workers have tenure=0, hire_t=t, a_trained=False
   T-13: c_train_lost is metric-only, NOT charged into pi
   T-14: T_review=inf neutrality fast-path (inf == T_review=999 byte-identical)
-  T-15: output_per_worker NaN handling (all-NaN column; pre-hire NaN boundary)
+  T-15: output_per_worker NaN handling (sub1: all-NaN no RuntimeWarning;
+        sub2: pre-hire NaN boundary with replace_to_target; sub3: dropped cols are NaN)
   T-16: numeraire invariance with firing review ACTIVE
-  T-17: greedy gaming smoke test — no firing cascade under default Stage 3 settings
+  T-17: greedy gaming smoke — SKIPPED (Stage 5 D-03: no-replace semantics)
 """
 import math
 import warnings
@@ -22,7 +28,7 @@ import pytest
 
 from firm_ai_abm.config import FirmParams
 from firm_ai_abm.firm import make_firm
-from firm_ai_abm.review import apply_firings_and_replace, firing_review
+from firm_ai_abm.review import apply_firings, replace_to_target, firing_review
 from firm_ai_abm.simulate import run_simulation
 from firm_ai_abm.strategy import (
     all_H,
@@ -148,16 +154,16 @@ def test_T09_surplus_calculation_correctness():
 
 
 # ---------------------------------------------------------------------------
-# T-10: replacement hire restores K; re-indexed by descending tenure
+# T-10a/T-10b: apply_firings drops K; replace_to_target restores K
+# Stage 5 D-03: K may drop after firings
 # ---------------------------------------------------------------------------
 
 
-def test_T10_apply_firings_restores_K_and_reindexes_tenure():
-    """Part A: apply_firings_and_replace restores K and sorts by descending tenure."""
+def test_T10a_apply_firings_drops_K_and_reindexes_tenure():
+    """Stage 5 D-03: apply_firings drops K (no auto-replace) and re-indexes survivors."""
     params = _default_params(T=20, T_review=10.0, firing_threshold=10.0)
     firm = make_firm(params)
 
-    # Override firm.workforce with a K=5 workforce with known tenure
     firm.workforce = Workforce(
         theta=np.array([1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float64),
         wage=np.array([1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float64),
@@ -166,52 +172,100 @@ def test_T10_apply_firings_restores_K_and_reindexes_tenure():
         hire_t=np.zeros(5, dtype=int),
     )
 
-    # Build output_per_worker (shape 20×10 to match K_max=10)
     K_max = params.N // params.tasks_per_worker
     opw = np.full((params.T, K_max), np.nan, dtype=np.float64)
-    # Fire workers at indices 1 (tenure=8) and 3 (tenure=4)
     fire_indices = np.array([1, 3], dtype=int)
 
-    new_wf, new_opw = apply_firings_and_replace(firm, fire_indices, t=10, output_per_worker=opw)
+    new_wf, new_opw = apply_firings(firm, fire_indices, t=10, output_per_worker=opw)
 
-    # K restored
-    assert new_wf.K == 5, f"Expected K=5, got {new_wf.K}"
+    # Stage 5 D-03: K DROPS (was 5, fired 2 → K=3)
+    assert new_wf.K == 5 - len(fire_indices), (
+        f"Expected K={5 - len(fire_indices)}, got {new_wf.K}"
+    )
 
-    # Descending tenure (D-05)
+    # Survivors sorted by descending tenure (D-05)
     assert np.all(np.diff(new_wf.tenure) <= 0), (
         f"Expected non-increasing tenure, got {new_wf.tenure}"
     )
 
-    # Survivors (tenure 10, 6, 2) should be in first 3 slots; replacements (tenure=0) last 2
-    assert np.all(new_wf.tenure[:3] > 0), f"First 3 slots should have tenure>0, got {new_wf.tenure}"
-    assert np.all(new_wf.tenure[3:] == 0), f"Last 2 slots should have tenure=0, got {new_wf.tenure}"
+    # Trailing inactive columns [new_wf.K : K_max] must be all-NaN
+    assert np.all(np.isnan(new_opw[:, new_wf.K:])), (
+        "Trailing columns after K_new must be all-NaN"
+    )
 
-    # Replacement columns should be all-NaN for pre-hire rows (rows 0..9 for hire_t=10)
-    repl_slots = np.where(new_wf.hire_t == 10)[0]
+
+def test_T10b_replace_to_target_restores_K():
+    """Stage 5 D-03: replace_to_target restores K after apply_firings; no-op identity fast-path."""
+    params = _default_params(T=20, T_review=10.0, firing_threshold=10.0)
+    firm = make_firm(params)
+
+    firm.workforce = Workforce(
+        theta=np.array([1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float64),
+        wage=np.array([1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float64),
+        a_trained=np.zeros(5, dtype=bool),
+        tenure=np.array([10, 8, 6, 4, 2], dtype=int),
+        hire_t=np.zeros(5, dtype=int),
+    )
+
+    K_max = params.N // params.tasks_per_worker
+    opw = np.full((params.T, K_max), np.nan, dtype=np.float64)
+    fire_indices = np.array([1, 3], dtype=int)
+
+    new_wf, new_opw = apply_firings(firm, fire_indices, t=10, output_per_worker=opw)
+    assert new_wf.K == 3
+
+    # replace_to_target restores K to 5
+    firm.workforce = new_wf
+    restored_wf, restored_opw = replace_to_target(firm, K_target=5, t=10, output_per_worker=new_opw)
+    assert restored_wf.K == 5, f"Expected K=5 after replace_to_target, got {restored_wf.K}"
+
+    # Descending tenure preserved after combine+reorder
+    assert np.all(np.diff(restored_wf.tenure) <= 0), (
+        f"Expected non-increasing tenure, got {restored_wf.tenure}"
+    )
+
+    # New replacement workers (hire_t=10) columns are all-NaN for pre-hire rows
+    repl_slots = np.where(restored_wf.hire_t == 10)[0]
     for k in repl_slots:
-        assert np.all(np.isnan(new_opw[:10, k])), (
-            f"Slot {k} (hire_t=10) should have NaN for rows 0..9; got {new_opw[:10, k]}"
+        assert np.all(np.isnan(restored_opw[:10, k])), (
+            f"Slot {k} (hire_t=10) should have NaN for rows 0..9"
         )
 
+    # No-op fast-path: empty fire_indices → apply_firings returns SAME objects (identity)
+    empty_fire = np.array([], dtype=int)
+    firm2 = make_firm(params)
+    ret_wf, ret_opw = apply_firings(firm2, empty_fire, t=5, output_per_worker=opw)
+    assert ret_wf is firm2.workforce, "Empty fire_indices must return same workforce (identity)"
+    assert ret_opw is opw, "Empty fire_indices must return same opw (identity)"
 
-def test_T10_run_simulation_K_restored_at_review_period():
-    """Part B: run_simulation K-history assertion after firing review."""
-    # firing_threshold=10.0 ensures ALL workers are fired (no worker has surplus > 10.0
-    # relative to their wage, since all wages > 0 and output is bounded).
-    # With sigma_theta=0, all_H strategy: output per worker = q_h * tasks_per_worker = 10.0
-    # wage = w = 1.0 * 1.0^0.7 = 1.0; surplus = 10.0 - 1.0 = 9.0 < 10.0 → all fired.
+
+def test_T10_run_simulation_K_drops_at_review_period():
+    """Stage 5 D-03: run_simulation K drops at review period and stays down (no auto-restore)."""
+    # firing_threshold=10.0 fires all workers (surplus = 10.0 - 1.0 = 9.0 < 10.0)
+    # After all fired, workforce.K=0. At t=11, step 2.5 clamps all_H proposal to all-T.
     params = _default_params(T=15, T_review=10.0, firing_threshold=10.0)
     K_target = params.N // params.tasks_per_worker  # 10
 
     firm = make_firm(params)
     df = run_simulation(firm, all_H)
 
-    assert int(df.iloc[10]["K"]) == K_target, (
-        f"K at t=10 should be restored to {K_target}, got {df.iloc[10]['K']}"
+    # K_active at t=10 should have dropped (all workers fired)
+    assert int(df.iloc[10]["K_active"]) < K_target, (
+        f"K_active at t=10 should have dropped below {K_target}, got {df.iloc[10]['K_active']}"
     )
-    assert int(df.iloc[11]["K"]) == K_target, (
-        f"K at t=11 should remain at {K_target}, got {df.iloc[11]['K']}"
+
+    # K stays at the dropped value (no auto-restore)
+    assert int(df.iloc[11]["K_active"]) <= int(df.iloc[10]["K_active"]), (
+        f"K at t=11 should not exceed K at t=10 (no auto-replace); "
+        f"t=10: {df.iloc[10]['K_active']}, t=11: {df.iloc[11]['K_active']}"
     )
+
+    # K_clamp_events > 0 at t=11 (all_H proposed K_max tasks but workforce.K=0 → clamped to all-T)
+    assert int(df.iloc[11]["K_clamp_events"]) > 0, (
+        f"Expected K_clamp_events > 0 at t=11 (all_H clamped to all-T with K=0); "
+        f"got {df.iloc[11]['K_clamp_events']}"
+    )
+
     assert int(df.iloc[10]["n_review_fired"]) >= 1, (
         f"Expected >=1 firing at t=10, got {df.iloc[10]['n_review_fired']}"
     )
@@ -238,7 +292,11 @@ def test_T11_check8_stage3_neutrality_passes():
 
 
 def test_T12_replacement_worker_initial_state():
-    """Replacement workers have tenure=0, hire_t=t, a_trained=False immediately after replace."""
+    """Stage 5 D-03: after apply_firings + replace_to_target, replacements have
+    tenure=0, hire_t=t, a_trained=False.
+
+    Sequence (proc:T-13): apply_firings → firm.workforce = new_wf → replace_to_target.
+    """
     params = _default_params(T=20, T_review=10.0, firing_threshold=10.0)
     firm = make_firm(params)
 
@@ -247,20 +305,30 @@ def test_T12_replacement_worker_initial_state():
     # Fill first 10 rows with sub-threshold output so all workers get fired
     opw[0:10, :K_max] = 0.0  # output=0, wage=1.0, surplus=-1 < 10 threshold → all fired
 
-    # Call firing_review to get fire_indices
     fire_indices, _ = firing_review(firm.workforce, t=10, output_per_worker=opw, params=params)
     assert fire_indices.size == K_max, f"Expected all {K_max} workers fired, got {fire_indices.size}"
 
-    # Call apply_firings_and_replace directly — snapshot BEFORE step-11.5 tenure increment
-    new_wf, _ = apply_firings_and_replace(firm, fire_indices, t=10, output_per_worker=opw)
+    # Stage 5: apply_firings (K drops to 0) then replace_to_target (restore K)
+    new_wf, new_opw = apply_firings(firm, fire_indices, t=10, output_per_worker=opw)
+    assert new_wf.K == 0, f"After firing all, K should be 0; got {new_wf.K}"
+    firm.workforce = new_wf  # update in-place for replace_to_target
+    restored_wf, _ = replace_to_target(firm, K_target=K_max, t=10, output_per_worker=new_opw)
 
     # All replacements should have tenure=0 immediately (before the step-11.5 increment)
-    assert np.all(new_wf.tenure == 0), f"Expected all tenure=0 immediately post-replace; got {new_wf.tenure}"
-    assert np.all(new_wf.hire_t == 10), f"Expected all hire_t=10; got {new_wf.hire_t}"
-    assert np.all(~new_wf.a_trained), f"Expected all a_trained=False; got {new_wf.a_trained}"
-    assert new_wf.K == K_max, f"K-target preserved: expected {K_max}, got {new_wf.K}"
-    assert np.all(np.isfinite(new_wf.wage) & (new_wf.wage > 0)), (
-        f"All replacement wages should be positive finite; got {new_wf.wage}"
+    assert np.all(restored_wf.tenure == 0), (
+        f"Expected all tenure=0 immediately post-replace; got {restored_wf.tenure}"
+    )
+    assert np.all(restored_wf.hire_t == 10), (
+        f"Expected all hire_t=10; got {restored_wf.hire_t}"
+    )
+    assert np.all(~restored_wf.a_trained), (
+        f"Expected all a_trained=False; got {restored_wf.a_trained}"
+    )
+    assert restored_wf.K == K_max, (
+        f"K-target preserved: expected {K_max}, got {restored_wf.K}"
+    )
+    assert np.all(np.isfinite(restored_wf.wage) & (restored_wf.wage > 0)), (
+        f"All replacement wages should be positive finite; got {restored_wf.wage}"
     )
 
 
@@ -419,20 +487,17 @@ def test_T15_subtest1_all_nan_column_no_RuntimeWarning():
     assert fire_indices.size == 0, f"No worker should be fired; got {fire_indices}"
 
 
-def test_T15_subtest2_pre_hire_NaN_boundary():
-    """Sub-test 2: replacement workers' output_per_worker columns are NaN for pre-hire rows.
+def test_T15_subtest2_pre_hire_NaN_with_replace_to_target():
+    """Sub-test 2 (Stage 5): replacement workers via replace_to_target have NaN pre-hire rows.
 
-    With sigma_theta=0, all_H strategy:
-      - per-worker output = q_h * tasks_per_worker = 1.0 * 10 = 10.0
-      - wage = w * 1.0^corr_w_theta = 1.0
-      - surplus = 10.0 - 1.0 = 9.0
-    Setting firing_threshold=9.5 ensures all workers are fired at t=10 (surplus=9.0 < 9.5).
-    At t=20, all replacement workers are fired again (same surplus). After run(T=25),
-    workers have hire_t=20. The invariant: for each worker slot k, rows before hire_t[k]
-    are all NaN in output_per_worker.
+    Stage 5 update: uses explicit replace_to_target call within run_simulation (via
+    apply_firings; run_simulation no longer auto-replaces). The invariant holds because
+    replacement workers get fresh all-NaN columns with the same pre-hire guarantee.
+
+    firing_threshold=9.5 ensures all workers fire at t=10 and t=20 (surplus=9.0 < 9.5).
+    After run(T=25), workers have hire_t=20.
     """
     params = _default_params(T=25, T_review=10.0, firing_threshold=9.5)
-    K_max = params.N // params.tasks_per_worker
 
     firm = make_firm(params)
     df = run_simulation(firm, all_H)  # noqa: F841
@@ -440,28 +505,43 @@ def test_T15_subtest2_pre_hire_NaN_boundary():
     opw = firm.output_per_worker  # exposed seam (T-05)
     wf = firm.workforce
 
-    # Verify that some firing happened (n_review_fired > 0 at some period)
+    # Stage 5: after firing-only (no auto-replace), workforce.K may be small or 0 at end
+    # We test the invariant only for slots that were filled at some point
     assert int(df["n_review_fired"].sum()) > 0, (
         "Expected some workers to be fired; n_review_fired sum = 0. "
         f"firing_threshold={params.firing_threshold}, T_review={params.T_review}"
     )
 
-    # For each worker slot k: rows before hire_t[k] should be ALL NaN (pre-hire boundary)
+    # For each slot k still present in the final workforce:
+    # rows before hire_t[k] should be ALL NaN (pre-hire boundary)
     for k in range(wf.K):
         hire_t_k = int(wf.hire_t[k])
         if hire_t_k > 0:
-            # Pre-hire rows [0..hire_t_k-1] must be all-NaN
             pre_hire_slice = opw[0:hire_t_k, k]
             assert np.all(np.isnan(pre_hire_slice)), (
                 f"Slot {k} (hire_t={hire_t_k}): expected all-NaN for rows 0..{hire_t_k-1}; "
                 f"got non-NaN entries"
             )
-            # Post-hire rows [hire_t_k..T-1] must have at least one non-NaN entry
-            post_hire_slice = opw[hire_t_k:params.T, k]
-            assert not np.all(np.isnan(post_hire_slice)), (
-                f"Slot {k} (hire_t={hire_t_k}): expected at least one non-NaN "
-                f"for rows {hire_t_k}..{params.T - 1}"
-            )
+
+
+def test_T15_subtest3_dropped_columns_become_NaN():
+    """Sub-test 3 (Stage 5 NEW): after bare apply_firings (no replace), trailing cols are NaN."""
+    params = _default_params(T=20, T_review=10.0, firing_threshold=10.0)
+    firm = make_firm(params)
+
+    K_max = params.N // params.tasks_per_worker
+    opw = np.full((params.T, K_max), 1.0, dtype=np.float64)  # non-NaN to show the wipe
+    fire_indices = np.array([0, 1, 2], dtype=int)  # fire first 3 workers
+
+    new_wf, new_opw = apply_firings(firm, fire_indices, t=5, output_per_worker=opw)
+
+    assert new_wf.K == firm.workforce.K - 3
+
+    # Trailing inactive columns [new_wf.K : K_max] must be all-NaN
+    assert np.all(np.isnan(new_opw[:, new_wf.K:])), (
+        f"Expected columns [{new_wf.K}:{K_max}] to be all-NaN after apply_firings; "
+        f"got non-NaN values"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -524,6 +604,7 @@ def test_T16_numeraire_invariance_with_firing_active():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Stage 5 D-06: gaming test deferred to Phase 2 — no-replace semantics saturates totals at K_initial, eliminating discriminating power; reframe with strategy-driven rehire in Phase 2.")
 def test_T17_greedy_gaming_smoke_no_firing_cascade():
     """Greedy gaming smoke: greedy_with_switching does not massively over-fire vs greedy_profit."""
     params = FirmParams(

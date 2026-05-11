@@ -86,6 +86,22 @@ class TestDashboardHelpers:
         assert len(runtime_warnings) == 0
         self._assert_figure(fig, "fig_K_over_time")
 
+    def test_fig_K_over_time_with_firings(self):
+        """When firings occur, fig_K_over_time renders a twin-axis with firing bars."""
+        from firm_ai_abm.dashboard import fig_K_over_time
+        p = FirmParams(seed=0, T_review=10.0, firing_threshold=100.0)
+        firm = make_firm(p)
+        df = run_simulation(firm, greedy_profit)
+        assert (df["n_review_fired"] > 0).any(), "Expected firing events for this test"
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            fig = fig_K_over_time(df)
+            runtime_warnings = [x for x in w if issubclass(x.category, RuntimeWarning)]
+        assert len(runtime_warnings) == 0
+        assert isinstance(fig, matplotlib.figure.Figure)
+        assert len(fig.axes) == 2, "Expected twin axes when firings present"
+        matplotlib.pyplot.close(fig)
+
     def test_fig_mode_mix_area(self, default_df):
         from firm_ai_abm.dashboard import fig_mode_mix_area
         df, firm, p = default_df
@@ -141,18 +157,36 @@ class TestDashboardHelpers:
         self._assert_figure(fig, "fig_firing_events (empty)")
 
     def test_fig_firing_events_nonempty(self):
-        """T_review=10 produces firing events; verify markers render."""
+        """T_review=10 + high firing_threshold guarantees firings; verify markers render."""
         from firm_ai_abm.dashboard import fig_firing_events
-        p = FirmParams(seed=0, T_review=10.0)
+        # firing_threshold=100.0 (kernel) >> any realistic surplus (~8-9), so all
+        # workers are fired at every review period — guarantees non-empty markers.
+        p = FirmParams(seed=0, T_review=10.0, firing_threshold=100.0)
         firm = make_firm(p)
         df = run_simulation(firm, greedy_profit)
+        assert (df["n_review_fired"] > 0).any(), "Expected actual firing events"
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            fig = fig_firing_events(df)
+            fig = fig_firing_events(df, T_review=10.0)
             runtime_warnings = [x for x in w if issubclass(x.category, RuntimeWarning)]
         assert len(runtime_warnings) == 0
         assert isinstance(fig, matplotlib.figure.Figure)
         assert len(fig.axes) >= 1
+        matplotlib.pyplot.close(fig)
+
+    def test_fig_firing_events_active_review_no_firings(self):
+        """T_review=10 but firing_threshold=0 → no firings; fallback message distinguishes from inf."""
+        from firm_ai_abm.dashboard import fig_firing_events
+        p = FirmParams(seed=0, T_review=10.0, firing_threshold=0.0)
+        firm = make_firm(p)
+        df = run_simulation(firm, greedy_profit)
+        assert (df["n_review_fired"] == 0).all(), "Expected zero firings with threshold=0"
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            fig = fig_firing_events(df, T_review=10.0)
+            runtime_warnings = [x for x in w if issubclass(x.category, RuntimeWarning)]
+        assert len(runtime_warnings) == 0
+        assert isinstance(fig, matplotlib.figure.Figure)
         matplotlib.pyplot.close(fig)
 
     def test_fig_trained_capital(self, default_df):
@@ -186,6 +220,69 @@ class TestDashboardHelpers:
         assert (df["n_a_trained"] == 0).all()
         fig = fig_trained_capital(df)
         self._assert_figure(fig, "fig_trained_capital (all_T zero)")
+
+    # --- Stage 5 T-10 new render tests ---
+
+    def test_fig_pi_per_period_over_time_renders(self, default_df):
+        """Stage 5 T-10: fig_pi_per_period_over_time renders and has at least one line."""
+        from firm_ai_abm.dashboard import fig_pi_per_period_over_time
+        import matplotlib.lines
+        df, firm, p = default_df
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            fig = fig_pi_per_period_over_time(df)
+            runtime_warnings = [x for x in w if issubclass(x.category, RuntimeWarning)]
+        assert len(runtime_warnings) == 0
+        self._assert_figure(fig, "fig_pi_per_period_over_time")
+        # Check at least one line artist exists
+        ax = fig.axes[0]
+        line_artists = [a for a in ax.get_children() if isinstance(a, matplotlib.lines.Line2D)]
+        assert len(line_artists) >= 1, "Expected at least one line in per-period profit plot"
+        matplotlib.pyplot.close(fig)
+
+    def test_K_active_caption_present(self, default_df):
+        """Stage 5 T-10: fig_K_over_time caption contains 'K = workforce headcount'."""
+        from firm_ai_abm.dashboard import fig_K_over_time
+        df, firm, p = default_df
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            fig = fig_K_over_time(df)
+        # Find text artists that contain the substring
+        ax = fig.axes[0]
+        text_strings = [t.get_text() for t in ax.texts]
+        # Also scan all text in figure
+        all_text = []
+        for a in fig.axes:
+            all_text.extend(t.get_text() for t in a.texts)
+        combined = " ".join(all_text)
+        assert "K = workforce headcount" in combined, (
+            f"Caption 'K = workforce headcount' not found in figure text. Got: {all_text}"
+        )
+        matplotlib.pyplot.close(fig)
+
+    def test_n_a_trained_degenerate_annotation(self, default_df):
+        """Stage 5 T-10: fig_trained_capital annotates when series is constant > 0."""
+        from firm_ai_abm.dashboard import fig_trained_capital
+        import pandas as pd
+
+        df, firm, p = default_df
+        # Build a df where n_a_trained is constant and > 0
+        df_degenerate = df.copy()
+        df_degenerate["n_a_trained"] = 5  # constant value > 0
+
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            fig = fig_trained_capital(df_degenerate)
+
+        # Check that the annotation text is present
+        all_text = []
+        for a in fig.axes:
+            all_text.extend(t.get_text() for t in a.texts)
+        combined = " ".join(all_text)
+        assert "trained by t=" in combined, (
+            f"Degenerate annotation 'trained by t=' not found. Got text: {all_text}"
+        )
+        matplotlib.pyplot.close(fig)
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +351,7 @@ class TestAppSmoke:
         )
 
     def test_footer_caption_content(self):
-        """Footer captions contain required strings."""
+        """Footer captions contain required strings (Stage 5: total firings + final K_active)."""
         from streamlit.testing.v1 import AppTest
         at = AppTest.from_file("app.py", default_timeout=60).run()
         assert not at.exception
@@ -265,6 +362,12 @@ class TestAppSmoke:
         )
         assert "final cumulative profit =" in combined, (
             f"Footer missing profit text. Captions: {caption_values}"
+        )
+        assert "total firings" in combined, (
+            f"Footer missing 'total firings'. Captions: {caption_values}"
+        )
+        assert "final K_active" in combined, (
+            f"Footer missing 'final K_active'. Captions: {caption_values}"
         )
 
 
@@ -350,3 +453,29 @@ class TestCacheHit:
             f"but it stayed at {start_ts}. "
             f"This may indicate the new params_key is incorrectly cached."
         )
+
+
+# ---------------------------------------------------------------------------
+# T-14b: README margin recipe CI smoke (no streamlit required)
+# ---------------------------------------------------------------------------
+
+
+def test_README_margin_recipe_at_default_seed():
+    """Stage 5 T-14b: README margin recipe (w=8.0, c_auto=0.6, F=5) hits 5–20% margin.
+
+    Verified recipe: FirmParams(seed=0, w=8.0, c_auto=0.6, F=5) with greedy_profit
+    produces margin ≈ 16.2% at T=60. Asserts 0.05 <= margin <= 0.20.
+    This test gates the README recipe claim at CI time.
+    """
+    from firm_ai_abm.firm import make_firm
+    from firm_ai_abm.simulate import run_simulation
+    from firm_ai_abm.strategy import greedy_profit
+
+    params = FirmParams(seed=0, w=8.0, c_auto=0.6, F=5)
+    firm = make_firm(params)
+    df = run_simulation(firm, greedy_profit)
+    margin = float(df["pi"].mean() / df["Y"].mean())
+    assert 0.05 <= margin <= 0.20, (
+        f"README margin recipe out of range: margin={margin:.3f} ({margin*100:.1f}%). "
+        "If recipe parameters changed, update README and this test together."
+    )
