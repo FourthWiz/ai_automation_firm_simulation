@@ -35,7 +35,7 @@ from firm_ai_abm.strategy import greedy_profit, all_T
 @pytest.fixture(scope="module")
 def default_df():
     """Run simulation with default FirmParams(seed=0) and greedy_profit."""
-    p = FirmParams(seed=0)
+    p = FirmParams(seed=0, tasks_per_worker=10, p=1.0)
     firm = make_firm(p)
     df = run_simulation(firm, greedy_profit)
     return df, firm, p
@@ -44,7 +44,7 @@ def default_df():
 @pytest.fixture(scope="module")
 def all_t_df():
     """Run simulation with all_T strategy (tests empty wage_bill / n_a_trained)."""
-    p = FirmParams(seed=0)
+    p = FirmParams(seed=0, tasks_per_worker=10, p=1.0)
     firm = make_firm(p)
     df = run_simulation(firm, all_T)
     return df, firm, p
@@ -89,7 +89,7 @@ class TestDashboardHelpers:
     def test_fig_K_over_time_with_firings(self):
         """When firings occur, fig_K_over_time renders a twin-axis with firing bars."""
         from firm_ai_abm.dashboard import fig_K_over_time
-        p = FirmParams(seed=0, T_review=10.0, firing_threshold=100.0)
+        p = FirmParams(seed=0, T_review=10.0, firing_threshold=100.0, tasks_per_worker=10, p=1.0)
         firm = make_firm(p)
         df = run_simulation(firm, greedy_profit)
         assert (df["n_review_fired"] > 0).any(), "Expected firing events for this test"
@@ -161,7 +161,7 @@ class TestDashboardHelpers:
         from firm_ai_abm.dashboard import fig_firing_events
         # firing_threshold=100.0 (kernel) >> any realistic surplus (~8-9), so all
         # workers are fired at every review period — guarantees non-empty markers.
-        p = FirmParams(seed=0, T_review=10.0, firing_threshold=100.0)
+        p = FirmParams(seed=0, T_review=10.0, firing_threshold=100.0, tasks_per_worker=10, p=1.0)
         firm = make_firm(p)
         df = run_simulation(firm, greedy_profit)
         assert (df["n_review_fired"] > 0).any(), "Expected actual firing events"
@@ -177,7 +177,7 @@ class TestDashboardHelpers:
     def test_fig_firing_events_active_review_no_firings(self):
         """T_review=10 but firing_threshold=0 → no firings; fallback message distinguishes from inf."""
         from firm_ai_abm.dashboard import fig_firing_events
-        p = FirmParams(seed=0, T_review=10.0, firing_threshold=0.0)
+        p = FirmParams(seed=0, T_review=10.0, firing_threshold=0.0, tasks_per_worker=10, p=1.0)
         firm = make_firm(p)
         df = run_simulation(firm, greedy_profit)
         assert (df["n_review_fired"] == 0).all(), "Expected zero firings with threshold=0"
@@ -471,7 +471,7 @@ def test_README_margin_recipe_at_default_seed():
     from firm_ai_abm.simulate import run_simulation
     from firm_ai_abm.strategy import greedy_profit
 
-    params = FirmParams(seed=0, w=8.0, c_auto=0.6, F=5)
+    params = FirmParams(seed=0, w=8.0, c_auto=0.6, F=5, tasks_per_worker=10, p=1.0)
     firm = make_firm(params)
     df = run_simulation(firm, greedy_profit)
     margin = float(df["pi"].mean() / df["Y"].mean())

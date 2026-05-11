@@ -150,21 +150,29 @@ def apply_firings(
     keep_mask = np.ones(wf.K, dtype=bool)
     keep_mask[fire_indices] = False
 
+    surv_aip = (
+        wf.a_training_in_progress[keep_mask].copy()
+        if wf.a_training_in_progress is not None
+        else None
+    )
     surv = Workforce(
         theta=wf.theta[keep_mask].copy(),
         wage=wf.wage[keep_mask].copy(),
         a_trained=wf.a_trained[keep_mask].copy(),
         tenure=wf.tenure[keep_mask].copy(),
         hire_t=wf.hire_t[keep_mask].copy(),
+        a_training_in_progress=surv_aip,
     )
 
     order = np.argsort(-surv.tenure, kind="stable")
+    new_aip = surv.a_training_in_progress[order] if surv.a_training_in_progress is not None else None
     new_wf = Workforce(
         theta=surv.theta[order],
         wage=surv.wage[order],
         a_trained=surv.a_trained[order],
         tenure=surv.tenure[order],
         hire_t=surv.hire_t[order],
+        a_training_in_progress=new_aip,
     )
 
     # Drop fired columns; survivor active columns reordered; trailing slots → NaN
@@ -207,21 +215,29 @@ def replace_to_target(
     n_repl = K_target - wf.K
     repl = sample_workforce(n_repl, firm.params, firm.rng, current_t=t)
 
+    combined_aip = (
+        np.concatenate([wf.a_training_in_progress, repl.a_training_in_progress])
+        if wf.a_training_in_progress is not None and repl.a_training_in_progress is not None
+        else None
+    )
     combined = Workforce(
         theta=np.concatenate([wf.theta, repl.theta]),
         wage=np.concatenate([wf.wage, repl.wage]),
         a_trained=np.concatenate([wf.a_trained, repl.a_trained]),
         tenure=np.concatenate([wf.tenure, repl.tenure]),
         hire_t=np.concatenate([wf.hire_t, repl.hire_t]),
+        a_training_in_progress=combined_aip,
     )
 
     order = np.argsort(-combined.tenure, kind="stable")
+    new_aip = combined.a_training_in_progress[order] if combined.a_training_in_progress is not None else None
     new_wf = Workforce(
         theta=combined.theta[order],
         wage=combined.wage[order],
         a_trained=combined.a_trained[order],
         tenure=combined.tenure[order],
         hire_t=combined.hire_t[order],
+        a_training_in_progress=new_aip,
     )
 
     active_cols = output_per_worker[:, : wf.K]

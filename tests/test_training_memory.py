@@ -42,9 +42,14 @@ def _make_workforce(K: int, a_trained_mask: np.ndarray | None = None) -> Workfor
 
 
 def _make_params(N: int = 100, K_implicit: int = 10, **kwargs) -> FirmParams:
-    """Return FirmParams with tasks_per_worker = N // K_implicit and given overrides."""
+    """Return FirmParams with tasks_per_worker = N // K_implicit and given overrides.
+
+    Pins p=1.0 by default to preserve Stage 1–2 fixtures.
+    """
     tpw = N // K_implicit
-    return FirmParams(N=N, tasks_per_worker=tpw, sigma_theta=0.0, sigma_w=0.0, **kwargs)
+    defaults = {"p": 1.0}
+    defaults.update(kwargs)
+    return FirmParams(N=N, tasks_per_worker=tpw, sigma_theta=0.0, sigma_w=0.0, **defaults)
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +118,7 @@ class TestCountWorkersEnteringAFirstTime:
 
     def test_k0_all_t_returns_zero(self):
         """K=0, all-T modes: returns (0, empty) without AssertionError."""
-        params = FirmParams(N=100, tasks_per_worker=10, sigma_theta=0.0, sigma_w=0.0)
+        params = FirmParams(N=100, tasks_per_worker=10, sigma_theta=0.0, sigma_w=0.0, p=1.0)
         wf = _make_workforce(0)
         prev = np.full(100, int(Mode.T), dtype=int)
         new = np.full(100, int(Mode.T), dtype=int)
@@ -223,6 +228,7 @@ class TestCheck6PerWorkerBlocking:
             sigma_theta=0.0,
             sigma_w=0.0,
             seed=42,
+            p=1.0,
         )
         firm = make_firm(params)
         df = run_simulation(firm, greedy_with_switching)
@@ -277,6 +283,7 @@ class TestAdjCostLegacyThreeArgByteParity:
             c_hire=0.0,
             sigma_theta=0.0,
             sigma_w=0.0,
+            p=1.0,
         )
         prev = np.zeros(100, dtype=int)      # all H
         new = np.full(100, int(Mode.A), dtype=int)  # all A
@@ -293,7 +300,7 @@ class TestAdjCostLegacyThreeArgByteParity:
         """Phase 1 path: same modes → 0 cost."""
         params = FirmParams(
             N=100, tasks_per_worker=10, c_train=0.5, c_fire=1.0, c_hire=1.0,
-            sigma_theta=0.0, sigma_w=0.0,
+            sigma_theta=0.0, sigma_w=0.0, p=1.0,
         )
         modes = np.zeros(100, dtype=int)
         cost = adj_cost(modes, modes, params)
@@ -338,6 +345,7 @@ class TestNATrainedMonotoneNondecreasing:
             sigma_theta=0.0,
             sigma_w=0.0,
             seed=42,
+            p=1.0,
         )
         firm = make_firm(params)
         df = run_simulation(firm, greedy_with_switching)
@@ -368,6 +376,7 @@ class TestNATrainedMonotoneNondecreasing:
             sigma_theta=0.0,
             sigma_w=0.0,
             seed=42,
+            p=1.0,
         )
         K = params.N // params.tasks_per_worker  # = 10
         firm = make_firm(params)
@@ -385,7 +394,7 @@ class TestNATrainedMonotoneNondecreasing:
         params = FirmParams(
             N=100, T=10, tasks_per_worker=10,
             c_train=0.1, c_fire=0.0, c_hire=0.0,
-            sigma_theta=0.0, sigma_w=0.0, seed=1,
+            sigma_theta=0.0, sigma_w=0.0, seed=1, p=1.0,
         )
         for strategy, name in [(all_H, "all_H"), (all_A, "all_A"), (all_T, "all_T")]:
             firm = make_firm(params)

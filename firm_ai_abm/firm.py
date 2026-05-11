@@ -28,6 +28,7 @@ class Firm:
         N = self.params.N
         self.modes = np.zeros(N, dtype=int)  # all H = Mode.H = 0
         self.history = []
+        self._margin_cache: dict = {}  # type: ignore[attr-defined]
         # workforce is NOT re-sampled here — it persists for the firm's lifetime
 
 
