@@ -453,3 +453,29 @@ class TestCacheHit:
             f"but it stayed at {start_ts}. "
             f"This may indicate the new params_key is incorrectly cached."
         )
+
+
+# ---------------------------------------------------------------------------
+# T-14b: README margin recipe CI smoke (no streamlit required)
+# ---------------------------------------------------------------------------
+
+
+def test_README_margin_recipe_at_default_seed():
+    """Stage 5 T-14b: README margin recipe (w=8.0, c_auto=0.6, F=5) hits 5–20% margin.
+
+    Verified recipe: FirmParams(seed=0, w=8.0, c_auto=0.6, F=5) with greedy_profit
+    produces margin ≈ 16.2% at T=60. Asserts 0.05 <= margin <= 0.20.
+    This test gates the README recipe claim at CI time.
+    """
+    from firm_ai_abm.firm import make_firm
+    from firm_ai_abm.simulate import run_simulation
+    from firm_ai_abm.strategy import greedy_profit
+
+    params = FirmParams(seed=0, w=8.0, c_auto=0.6, F=5)
+    firm = make_firm(params)
+    df = run_simulation(firm, greedy_profit)
+    margin = float(df["pi"].mean() / df["Y"].mean())
+    assert 0.05 <= margin <= 0.20, (
+        f"README margin recipe out of range: margin={margin:.3f} ({margin*100:.1f}%). "
+        "If recipe parameters changed, update README and this test together."
+    )
