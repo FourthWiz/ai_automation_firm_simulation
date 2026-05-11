@@ -327,3 +327,128 @@ def fig_trained_capital(df: pd.DataFrame) -> matplotlib.figure.Figure:
 
     fig.tight_layout()
     return fig
+
+
+def fig_wage_histogram(workforce_wage: np.ndarray) -> matplotlib.figure.Figure:
+    """Histogram of the final-period worker wage distribution.
+
+    Input:
+        workforce_wage: 1-D numpy array of worker wage values from the
+            final period (shape: (K,) where K = active worker count).
+    Output:
+        Figure with one Axes: histogram with 20 bins, dashed vertical mean line.
+    Color: #8172B3 (purple, matches fig_wage_bill_over_time).
+    No disk I/O — returns Figure only.
+    """
+    wage = np.asarray(workforce_wage)
+    fig, ax = plt.subplots(figsize=(5, 3))
+    ax.hist(wage, bins=20, color="#8172B3", edgecolor="white", alpha=0.8)
+    if len(wage) > 0:
+        ax.axvline(float(np.mean(wage)), color="#C44E52", linewidth=1.2,
+                   linestyle="--", label=f"mean={np.mean(wage):.3f}")
+        ax.legend(frameon=False, fontsize=8)
+    ax.set_xlabel("wage")
+    ax.set_ylabel("count")
+    ax.set_title("Final-Period Wage Distribution")
+    ax.grid(alpha=0.3, axis="y")
+    fig.tight_layout()
+    return fig
+
+
+def fig_wage_vs_cumulative_output(
+    wages_final: np.ndarray,
+    cum_output_per_worker: np.ndarray,
+    a_trained_final: np.ndarray,
+) -> matplotlib.figure.Figure:
+    """Scatter of worker wage vs cumulative output, colored by training status.
+
+    Input:
+        wages_final: 1-D array of final-period wages, shape (K,).
+        cum_output_per_worker: 1-D array of NaN-summed cumulative output per worker,
+            shape (K,). Workers where all output columns are NaN are excluded.
+        a_trained_final: 1-D bool array of training status, shape (K,).
+    Output:
+        Figure with scatter: X=wage, Y=cumulative output. Two colors:
+          trained (#55A868 green), untrained (#4C72B0 blue). Legend shows counts.
+        Workers where all output is NaN are excluded (fired before producing; misleading as 0).
+    No disk I/O — returns Figure only.
+    """
+    wages = np.asarray(wages_final)
+    cum_out = np.asarray(cum_output_per_worker)
+    trained = np.asarray(a_trained_final, dtype=bool)
+
+    # Exclude workers where cumulative output is NaN (zero data — T-mode-only or pre-hire)
+    valid = ~np.isnan(cum_out)
+    wages = wages[valid]
+    cum_out = cum_out[valid]
+    trained = trained[valid]
+
+    fig, ax = plt.subplots(figsize=(5, 3))
+
+    n_trained = int(trained.sum())
+    n_untrained = int((~trained).sum())
+
+    if n_untrained > 0:
+        ax.scatter(wages[~trained], cum_out[~trained], color="#4C72B0", alpha=0.7,
+                   s=20, label=f"untrained (n={n_untrained})")
+    if n_trained > 0:
+        ax.scatter(wages[trained], cum_out[trained], color="#55A868", alpha=0.7,
+                   s=20, label=f"trained (n={n_trained})")
+
+    if n_trained > 0 or n_untrained > 0:
+        ax.legend(frameon=False, fontsize=8)
+
+    ax.set_xlabel("wage")
+    ax.set_ylabel("cumulative output (NaN-summed over periods)")
+    ax.set_title("Wage vs. Cumulative Output")
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    return fig
+
+
+def fig_hiring_events(df: pd.DataFrame, enable_hiring: bool = False) -> matplotlib.figure.Figure:
+    """Hiring events timeline at review periods.
+
+    Mirrors fig_firing_events: scatter of t values where n_hired > 0.
+    Input:
+        df: run_simulation DataFrame with columns 't' (int) and
+            'n_hired' (int, workers hired this period; 0 when enable_hiring=False).
+        enable_hiring: the enable_hiring flag used for the run (default False).
+            Used to distinguish "hiring disabled" vs "no hires despite being enabled".
+    Output:
+        Figure with one Axes: scatter of t values where n_hired > 0.
+        Baseline at y=0. Empty-state message when no hires occurred.
+    Color: markers in #55A868 (green — opposite semantic of firing red).
+    No disk I/O — returns Figure only.
+    """
+    hired_col = df.get("n_hired", pd.Series(0, index=df.index))
+    mask = hired_col > 0
+    t_hired = df["t"][mask].values
+    n_hired = hired_col[mask].values
+
+    fig, ax = plt.subplots(figsize=(5, 3))
+    ax.axhline(0, color="lightgray", linewidth=0.8, linestyle="--")
+
+    if len(t_hired) > 0:
+        max_n = float(n_hired.max())
+        sizes = [max(40, 40 * v / max_n * 5) for v in n_hired]
+        ax.scatter(t_hired, n_hired, s=sizes, color="#55A868", alpha=0.8,
+                   zorder=3, label="workers hired")
+        ax.legend(frameon=False, fontsize=8)
+    else:
+        if not enable_hiring:
+            msg = "hiring disabled\n(enable_hiring=False)"
+        else:
+            msg = "no hiring events\n(no firings to backfill)"
+        ax.text(0.5, 0.5, msg,
+                transform=ax.transAxes, ha="center", va="center",
+                fontsize=9, color="gray")
+
+    t_max = int(df["t"].max()) if len(df) > 0 else 1
+    ax.set_xlim(-0.5, t_max + 0.5)
+    ax.set_xlabel("period")
+    ax.set_ylabel("workers hired")
+    ax.set_title("Hiring Events Over Time")
+    ax.grid(alpha=0.3, axis="y")
+    fig.tight_layout()
+    return fig

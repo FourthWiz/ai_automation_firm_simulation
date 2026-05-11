@@ -44,3 +44,37 @@ def test_enable_training_delay_checkbox_defaults_true():
         "enable_training_delay checkbox should default to True in the dashboard "
         "(FirmParams default is False — deliberate two-defaults seam per D-01)."
     )
+
+
+def test_cache_key_length():
+    """T-12: cache key has exactly 28 elements; _PARAM_FIELDS has exactly 27."""
+    assert len(_PARAM_FIELDS) == 27, (
+        f"Expected 27 fields in _PARAM_FIELDS, got {len(_PARAM_FIELDS)}"
+    )
+    key = params_to_key(FirmParams(), 0)
+    assert len(key) == 28, (
+        f"Expected 28-tuple from params_to_key, got {len(key)}"
+    )
+    # Spot-check: index 26 = enable_hiring, index 27 = seed
+    assert key[26] == FirmParams().enable_hiring, f"key[26] should be enable_hiring, got {key[26]}"
+    assert key[-1] == 0, f"key[-1] should be seed=0, got {key[-1]}"
+
+
+def test_enable_hiring_checkbox_defaults_false():
+    """T-12: enable_hiring checkbox defaults to False (dormant/opt-in semantics)."""
+    try:
+        from streamlit.testing.v1 import AppTest
+    except ImportError:
+        pytest.skip("streamlit AppTest not available")
+
+    at = AppTest.from_file("app.py", default_timeout=30)
+    at.run()
+
+    checkboxes = {cb.key: cb for cb in at.checkbox}
+    assert "enable_hiring" in checkboxes, (
+        "enable_hiring checkbox not found in sidebar. "
+        f"Available checkboxes: {list(checkboxes.keys())}"
+    )
+    assert checkboxes["enable_hiring"].value is False, (
+        "enable_hiring checkbox should default to False (opt-in per D-02)."
+    )
