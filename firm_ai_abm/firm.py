@@ -30,6 +30,7 @@ class Firm:
         self.history = []
         self._margin_cache: dict = {}  # type: ignore[attr-defined]
         # workforce is NOT re-sampled here — it persists for the firm's lifetime
+        # K0 is intentionally NOT reset here — it is the initial headcount set once in make_firm
 
 
 def make_firm(params: FirmParams) -> Firm:
@@ -45,5 +46,6 @@ def make_firm(params: FirmParams) -> Firm:
     firm = Firm(params=params, alpha=alpha, beta=beta, rng=rng)
     # Sample workforce BEFORE reset() so rng state is stable across resets (CRIT-2)
     firm.workforce = _make_initial_workforce(params, rng)
+    firm.K0 = firm.workforce.K  # set ONCE at construction; never reassigned by reset()
     firm.reset()
     return firm

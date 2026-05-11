@@ -286,6 +286,104 @@ class TestDashboardHelpers:
 
 
 # ---------------------------------------------------------------------------
+# Stage 6 VIZ tests: wage histogram, wage-vs-output, hiring events
+# ---------------------------------------------------------------------------
+
+    def test_fig_wage_histogram(self):
+        """T-08 VIZ-1: fig_wage_histogram renders, has correct labels and mean line."""
+        from firm_ai_abm.dashboard import fig_wage_histogram
+        import matplotlib.lines
+        wages = np.array([0.8, 0.9, 1.0, 1.1, 1.2])
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            fig = fig_wage_histogram(wages)
+        assert len([x for x in w if issubclass(x.category, RuntimeWarning)]) == 0
+        ax = fig.axes[0]
+        assert ax.get_xlabel() == "wage"
+        assert ax.get_ylabel() == "count"
+        assert "Wage" in ax.get_title()
+        # Mean vline should be present
+        vlines = [a for a in ax.get_children() if isinstance(a, matplotlib.lines.Line2D)]
+        assert len(vlines) >= 1, "Expected mean vline in wage histogram"
+        matplotlib.pyplot.close(fig)
+
+    def test_fig_wage_histogram_empty(self):
+        """T-08 VIZ-1: fig_wage_histogram handles empty array without error."""
+        from firm_ai_abm.dashboard import fig_wage_histogram
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            fig = fig_wage_histogram(np.array([]))
+        assert fig is not None
+        matplotlib.pyplot.close(fig)
+
+    def test_fig_wage_vs_cumulative_output(self):
+        """T-09 VIZ-2: fig_wage_vs_cumulative_output renders correct point count."""
+        from firm_ai_abm.dashboard import fig_wage_vs_cumulative_output
+        wages = np.array([0.9, 1.0, 1.1])
+        cum_out = np.array([10.0, 12.0, np.nan])  # worker 2 has NaN → excluded
+        a_trained = np.array([False, True, False])
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            fig = fig_wage_vs_cumulative_output(wages, cum_out, a_trained)
+        ax = fig.axes[0]
+        # Only 2 valid workers (worker 2 excluded due to NaN)
+        scatter_offsets = []
+        for collection in ax.collections:
+            scatter_offsets.extend(collection.get_offsets().data.tolist())
+        assert len(scatter_offsets) == 2, (
+            f"Expected 2 scatter points (1 NaN worker excluded), got {len(scatter_offsets)}"
+        )
+        # Two legend entries (trained + untrained)
+        legend = ax.get_legend()
+        assert legend is not None, "Expected legend"
+        assert len(legend.get_texts()) == 2, "Expected 2 legend entries (trained + untrained)"
+        matplotlib.pyplot.close(fig)
+
+    def test_fig_wage_vs_cumulative_output_all_nan(self):
+        """T-09 VIZ-2: handles empty active workers without raising."""
+        from firm_ai_abm.dashboard import fig_wage_vs_cumulative_output
+        wages = np.array([1.0, 1.0])
+        cum_out = np.array([np.nan, np.nan])  # all NaN → empty plot
+        a_trained = np.array([False, False])
+        fig = fig_wage_vs_cumulative_output(wages, cum_out, a_trained)
+        assert fig is not None
+        matplotlib.pyplot.close(fig)
+
+    def test_fig_hiring_events_disabled(self):
+        """T-10 VIZ-3: fig_hiring_events disabled renders the disabled message."""
+        from firm_ai_abm.dashboard import fig_hiring_events
+        from firm_ai_abm.config import FirmParams
+        from firm_ai_abm.firm import make_firm
+        from firm_ai_abm.simulate import run_simulation
+        from firm_ai_abm.strategy import all_H
+        params = FirmParams(seed=0)
+        firm = make_firm(params)
+        df = run_simulation(firm, all_H)
+        fig = fig_hiring_events(df, enable_hiring=False)
+        ax = fig.axes[0]
+        all_text = [t.get_text() for t in ax.texts]
+        combined = " ".join(all_text)
+        assert "hiring disabled" in combined or "enable_hiring=False" in combined, (
+            f"Expected disabled message; got text: {all_text}"
+        )
+        matplotlib.pyplot.close(fig)
+
+    def test_fig_hiring_events_active(self):
+        """T-10 VIZ-3: fig_hiring_events with hiring events renders scatter point."""
+        from firm_ai_abm.dashboard import fig_hiring_events
+        import pandas as pd
+        df = pd.DataFrame({"t": [0, 1, 2, 3], "n_hired": [0, 3, 0, 0]})
+        fig = fig_hiring_events(df, enable_hiring=True)
+        ax = fig.axes[0]
+        # Should have one scatter collection with one point at t=1
+        scatter_collections = [c for c in ax.collections if hasattr(c, "get_offsets")]
+        assert any(len(c.get_offsets()) > 0 for c in scatter_collections), (
+            "Expected scatter point for hiring event at t=1"
+        )
+        matplotlib.pyplot.close(fig)
+
+
+# ---------------------------------------------------------------------------
 # T-08: AppTest smoke test (requires streamlit >= 1.28)
 # ---------------------------------------------------------------------------
 
@@ -351,19 +449,23 @@ class TestAppSmoke:
                 f"Available labels: {sorted(all_labels)}"
             )
 
-    def test_main_panel_has_8_plots(self):
-        """Main panel renders 8 pyplot figures (as UnknownElement in AppTest 1.57)."""
+    def test_main_panel_has_11_plots(self):
+        """Main panel renders 11 pyplot figures (as UnknownElement in AppTest 1.57).
+
+        3 new plots added in Stage 6: wage histogram, wage-vs-output scatter,
+        hiring events. row6_right is blank (no st.pyplot) → count = 8+3 = 11.
+        """
         from streamlit.testing.v1 import AppTest
         at = AppTest.from_file("app.py", default_timeout=60).run()
         assert not at.exception
         # st.pyplot renders as UnknownElement in Streamlit 1.57 AppTest
         unknown_count = sum(1 for el in at.main if type(el).__name__ == "UnknownElement")
-        assert unknown_count == 8, (
-            f"Expected 8 st.pyplot (UnknownElement) in main panel, got {unknown_count}"
+        assert unknown_count == 11, (
+            f"Expected 11 st.pyplot (UnknownElement) in main panel, got {unknown_count}"
         )
 
     def test_footer_caption_content(self):
-        """Footer captions contain required strings (Stage 5: total firings + final K_active)."""
+        """Footer captions contain required strings (Stage 6: total firings, total hirings, final K_active)."""
         from streamlit.testing.v1 import AppTest
         at = AppTest.from_file("app.py", default_timeout=60).run()
         assert not at.exception
@@ -377,6 +479,9 @@ class TestAppSmoke:
         )
         assert "total firings" in combined, (
             f"Footer missing 'total firings'. Captions: {caption_values}"
+        )
+        assert "total hirings" in combined, (
+            f"Footer missing 'total hirings'. Captions: {caption_values}"
         )
         assert "final K_active" in combined, (
             f"Footer missing 'final K_active'. Captions: {caption_values}"
@@ -422,7 +527,7 @@ class TestCacheHit:
         )
 
         # Click Run with no slider changes — identical params_key → cache hit.
-        # The cached 5-tuple is returned → same computed_at timestamp.
+        # The cached 7-tuple is returned → same computed_at timestamp.
         at = at.button[0].click().run()
         assert not at.exception
 
@@ -463,7 +568,7 @@ class TestCacheHit:
         assert end_ts != start_ts, (
             f"Expected timestamp to change after param change (cache miss), "
             f"but it stayed at {start_ts}. "
-            f"This may indicate the new params_key is incorrectly cached."
+            f"This may indicate the new params_key (28-tuple) is incorrectly cached."
         )
 
 

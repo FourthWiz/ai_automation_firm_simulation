@@ -49,6 +49,9 @@ from firm_ai_abm.dashboard import (
     fig_mean_theta_over_time,
     fig_firing_events,
     fig_trained_capital,
+    fig_wage_histogram,
+    fig_wage_vs_cumulative_output,
+    fig_hiring_events,
 )
 
 # ---------------------------------------------------------------------------
@@ -64,9 +67,10 @@ _STRATEGY_REGISTRY = {
     "target_margin": target_margin_strategy,
 }
 
-# 26 scalar FirmParams fields in order (excludes 'seed' which is appended separately)
+# 27 scalar FirmParams fields in order (excludes 'seed' which is appended separately)
 # Indices: 0=N, 20=T_review, 21=firing_threshold, 22=scenario_mode,
-#          23=target_margin, 24=margin_horizon, 25=enable_training_delay, -1=seed
+#          23=target_margin, 24=margin_horizon, 25=enable_training_delay,
+#          26=enable_hiring, -1=seed (position 27)
 _PARAM_FIELDS = (
     "N", "T", "tasks_per_worker",
     "q_h", "q_a", "g",
@@ -76,18 +80,20 @@ _PARAM_FIELDS = (
     "sigma_theta", "theta_min", "theta_max", "corr_w_theta", "sigma_w",
     "T_review", "firing_threshold",
     "scenario_mode", "target_margin", "margin_horizon", "enable_training_delay",
+    "enable_hiring",  # index 26; seed moves to position 27 (still key[-1])
 )
 
 
 def params_to_key(params: FirmParams, seed: int) -> tuple:
-    """Build a 27-tuple cache key from a FirmParams instance and seed.
+    """Build a 28-tuple cache key from a FirmParams instance and seed.
 
     The tuple contains only Python scalars (int, float, bool, str). math.inf is
     included as a float — hash(math.inf) is stable in CPython.
-    seed is appended as the 27th element.
+    seed is appended as the 28th element (position 27).
 
     Indices: 0=N, 20=T_review, 21=firing_threshold, 22=scenario_mode,
-             23=target_margin, 24=margin_horizon, 25=enable_training_delay, -1=seed
+             23=target_margin, 24=margin_horizon, 25=enable_training_delay,
+             26=enable_hiring, -1=seed (position 27)
     """
     values = tuple(getattr(params, f) for f in _PARAM_FIELDS)
     return values + (seed,)
@@ -114,19 +120,22 @@ def run_cached(params_key: tuple, strategy_name: str) -> tuple:
     """Run the simulation for the given params key and strategy.
 
     Args:
-        params_key: 27-tuple from params_to_key(). The last element is seed.
+        params_key: 28-tuple from params_to_key(). The last element is seed.
             Indices 20=T_review, 21=firing_threshold, 22=scenario_mode,
-            23=target_margin, 24=margin_horizon, 25=enable_training_delay.
+            23=target_margin, 24=margin_horizon, 25=enable_training_delay,
+            26=enable_hiring, -1=seed (position 27).
         strategy_name: key into _STRATEGY_REGISTRY.
 
     Returns:
-        5-tuple: (df, theta_final, wages_final, K_max, call_id)
-          df:           run_simulation DataFrame (T rows × 13+ columns)
-          theta_final:  list[float] — firm.workforce.theta after final period
-          wages_final:  list[float] — firm.workforce.wage after final period
-          K_max:        int — N // tasks_per_worker (max possible workers)
-          call_id:      int — RUN_COUNTER[0] at time of actual computation;
-                        identical for cache hits (same cached value returned)
+        7-tuple: (df, theta_final, wages_final, K_max, call_id, output_per_worker, a_trained_final)
+          df:               run_simulation DataFrame (T rows × 13+ columns)
+          theta_final:      list[float] — firm.workforce.theta after final period
+          wages_final:      list[float] — firm.workforce.wage after final period
+          K_max:            int — N // tasks_per_worker (max possible workers)
+          call_id:          int — RUN_COUNTER[0] at time of actual computation;
+                            identical for cache hits (same cached value returned)
+          output_per_worker: list[list[float]] — firm.output_per_worker.tolist()
+          a_trained_final:  list[bool] — firm.workforce.a_trained.tolist()
 
     Cache-hit observability: a monotonic timestamp (time.monotonic_ns()) is
         captured at actual computation time and returned as the 5th element.
@@ -147,7 +156,9 @@ def run_cached(params_key: tuple, strategy_name: str) -> tuple:
     theta_final = firm.workforce.theta.tolist()
     wages_final = firm.workforce.wage.tolist()
     K_max = params.N // params.tasks_per_worker
-    return df, theta_final, wages_final, K_max, computed_at
+    output_per_worker = firm.output_per_worker.tolist()
+    a_trained_final = firm.workforce.a_trained.tolist()
+    return df, theta_final, wages_final, K_max, computed_at, output_per_worker, a_trained_final
 
 
 # ---------------------------------------------------------------------------
@@ -272,13 +283,22 @@ def _build_sidebar() -> tuple:
             "firing_threshold", -1.0, 1.0, 0.0, 0.05,
             help=(
                 "Per-task surplus threshold. Workers fired when "
-                "(mean output / tasks_per_worker − wage) < threshold. "
-                "0 = fire negative-surplus workers; increase toward 1 to fire more."
+                "(p · mean_output − wage) < threshold · tasks_per_worker, "
+                "where mean_output is summed over the worker's tasks. "
+                "Threshold expressed in per-task price-scaled surplus units. "
+                "0 = fire workers whose price-scaled output does not cover their wage."
             ),
             key="firing_threshold",
         )
         # Convert UI (per-task) → kernel (per-worker) by multiplying by tasks_per_worker
         firing_threshold_kernel = float(firing_threshold_ui) * int(tasks_per_worker)
+        # enable_hiring UI default: False (matches FirmParams default) — hiring incurs c_hire; must be opt-in
+        enable_hiring_val = st.checkbox(
+            "enable_hiring",
+            value=False,
+            help="When enabled, fired workers are immediately rehired toward initial headcount K0. c_hire is charged per hire.",
+            key="enable_hiring",
+        )
 
     # Margin scenario (T-09)
     with st.sidebar.expander("Margin scenario", expanded=False):
@@ -338,6 +358,7 @@ def _build_sidebar() -> tuple:
         target_margin=float(target_margin_val),
         margin_horizon=int(margin_horizon_val),
         enable_training_delay=bool(enable_training_delay_val),
+        enable_hiring=bool(enable_hiring_val),
         seed=int(seed),
     )
     key = params_to_key(draft_params, int(seed))
@@ -379,7 +400,7 @@ def main() -> None:
     # computed_at is a monotonic timestamp captured at actual computation time.
     # A cache hit returns the SAME (old) timestamp — this is the observable.
     try:
-        df, theta_final, wages_final, K_max, computed_at = run_cached(active_key, active_strategy)
+        df, theta_final, wages_final, K_max, computed_at, output_per_worker_list, a_trained_final = run_cached(active_key, active_strategy)
     except Exception as e:
         st.error(f"Simulation failed: {type(e).__name__}: {e}")
         st.code(traceback.format_exc(), language="text")
@@ -399,7 +420,7 @@ def main() -> None:
             "try a lower firing_threshold."
         )
 
-    # 4 rows × 2 columns layout (D-07, proc:T-06)
+    # 6 rows × 2 columns layout (D-01; row6_right is blank placeholder for Phase 2)
     row1_left, row1_right = st.columns(2)
     with row1_left:
         # Stage 5 D-10: per-period profit replaces cumulative in row1_left
@@ -425,10 +446,36 @@ def main() -> None:
     with row4_right:
         st.pyplot(fig_trained_capital(df))
 
+    row5_left, row5_right = st.columns(2)
+    with row5_left:
+        st.pyplot(fig_wage_histogram(np.array(wages_final)))
+    with row5_right:
+        opw_arr = np.array(output_per_worker_list)
+        K_active_final = int(df["K_active"].iloc[-1])
+        # NaN-sum cumulative output per worker over all periods, active workers only
+        cum_opw = np.nansum(opw_arr[:, :K_active_final], axis=0) if K_active_final > 0 else np.array([])
+        # Mark workers with all-NaN output as NaN (excluded from scatter)
+        if K_active_final > 0:
+            all_nan_mask = np.all(np.isnan(opw_arr[:, :K_active_final]), axis=0)
+            cum_opw[all_nan_mask] = np.nan
+        a_trained_arr = np.array(a_trained_final[:K_active_final], dtype=bool) if K_active_final > 0 else np.array([], dtype=bool)
+        st.pyplot(fig_wage_vs_cumulative_output(
+            np.array(wages_final[:K_active_final]),
+            cum_opw,
+            a_trained_arr,
+        ))
+
+    row6_left, row6_right = st.columns(2)
+    with row6_left:
+        enable_hiring_active = bool(active_key[26])  # index 26 = enable_hiring
+        st.pyplot(fig_hiring_events(df, enable_hiring=enable_hiring_active))
+    # row6_right is empty — reserved for Phase 2
+
     # Footer
     theta_arr = np.array(theta_final)
     wages_arr = np.array(wages_final)
     total_firings = int(df["n_review_fired"].sum()) if "n_review_fired" in df.columns else 0
+    total_hirings = int(df["n_hired"].sum()) if "n_hired" in df.columns else 0
     final_k_active = int(df["K_active"].iloc[-1]) if "K_active" in df.columns else 0
     final_pi = float(df["pi"].cumsum().iloc[-1])
 
@@ -441,13 +488,15 @@ def main() -> None:
     if math.isnan(realized_corr) and final_k_active == 0:
         st.caption(
             "corr = N/A (workforce dropped to K=0; consider reducing firing_threshold)"
-            f"    total firings = {total_firings}    final K_active = {final_k_active}"
+            f"    total firings = {total_firings}    total hirings = {total_hirings}"
+            f"    final K_active = {final_k_active}"
         )
     else:
         st.caption(
             f"corr(theta, log(wage)) = {realized_corr:.4f}"
             f"    final cumulative profit = {final_pi:.4f}"
-            f"    total firings = {total_firings}    final K_active = {final_k_active}"
+            f"    total firings = {total_firings}    total hirings = {total_hirings}"
+            f"    final K_active = {final_k_active}"
         )
     # Show cache-hit observability via RUN_COUNTER.
     st.caption(f"sim invocations this session: {RUN_COUNTER[0]}")

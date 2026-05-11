@@ -33,6 +33,16 @@ Stage 5 API change (D-03):
     replace_to_target(firm, K_target, t, output_per_worker) — opt-in; appends
         K_target - wf.K replacements. Call AFTER apply_firings if hire-back is
         desired. run_simulation calls ONLY apply_firings (no auto-replace).
+
+decision-twelve (Stage 6, see firing-logic-and-wage-viz plan): surplus = p · mean_output − wage.
+  Pre-fix the formula omitted the price factor p, making surplus dimensionally
+  inconsistent (output units ≠ wage units when p ≠ 1). Post-fix:
+    surplus[k] = params.p * mean_output[k] - workforce.wage[k]
+  Numeraire invariance: under (w, c_*, F, p) × 2, surplus × 2, fire_mask unchanged.
+  The kernel-side threshold scaling at app.py:281 (firing_threshold_kernel =
+  firing_threshold_ui * tasks_per_worker) remains correct pre- and post-fix: the
+  UI threshold is in per-task surplus units, and the kernel compares the per-worker
+  surplus to threshold * tpw — dimensional consistency preserved on both sides.
 """
 from __future__ import annotations
 
@@ -72,6 +82,8 @@ def firing_review(
     Returns:
         (fire_indices, c_train_lost_metric) where:
           - fire_indices: np.ndarray of int, indices of workers to fire (may be empty).
+            surplus is price-scaled revenue per worker minus wage:
+            surplus[k] = params.p * mean_output[k] - workforce.wage[k]
           - c_train_lost_metric: float, value of trained capital lost (metric only).
         Returns (empty array, 0.0) when T_review=inf, t=0, or t is not a review period.
     """
@@ -105,7 +117,9 @@ def firing_review(
     # or workers hired between the prior review and this one with zero observations).
 
     surplus = np.full(workforce.K, np.nan, dtype=np.float64)
-    surplus[col_has_data] = mean_output[col_has_data] - workforce.wage[col_has_data]
+    surplus[col_has_data] = (
+        params.p * mean_output[col_has_data] - workforce.wage[col_has_data]
+    )
 
     fire_mask = (~np.isnan(surplus)) & (surplus < params.firing_threshold)
     fire_indices = np.where(fire_mask)[0].astype(int)
