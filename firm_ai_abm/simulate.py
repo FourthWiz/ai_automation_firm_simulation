@@ -195,14 +195,16 @@ def run_simulation(firm: Firm, strategy: Callable, T: int | None = None) -> pd.D
         # per-worker output in output_per_worker (Stage 3 D-02, D-03)
         # -----------------------------------------------------------------------
         t2w = task_to_worker_map(firm.modes, firm.workforce.K, firm.params.tasks_per_worker)
-        # T-slots map to -1; their theta is unused (T-branch in productivity_vec ignores theta)
-        # np.where(t2w >= 0, t2w, 0) avoids negative indexing; value at T-slots is multiplied
-        # by 0.0 (via the Mode.H / Mode.A conditions) so the spurious index[0] doesn't matter
-        theta_per_task = np.where(
-            t2w >= 0,
-            firm.workforce.theta[np.where(t2w >= 0, t2w, 0)],
-            1.0,
-        )
+        # When workforce.K=0 (all tasks clamped to T), theta array is empty — guard indexing.
+        # T-mode tasks never use theta, so 1.0 placeholder is correct.
+        if firm.workforce.K > 0:
+            theta_per_task = np.where(
+                t2w >= 0,
+                firm.workforce.theta[np.where(t2w >= 0, t2w, 0)],
+                1.0,
+            )
+        else:
+            theta_per_task = np.ones(firm.params.N, dtype=np.float64)
         prod_per_task = productivity_vec(
             firm.modes, firm.alpha, firm.beta, firm.params, theta_per_task=theta_per_task
         )
@@ -244,8 +246,8 @@ def run_simulation(firm: Firm, strategy: Callable, T: int | None = None) -> pd.D
             "modes": firm.modes.copy(),
             "adj_cost": period_adj,
             "wage_bill": wage_bill,
-            "mean_theta": float(firm.workforce.theta.mean()),
-            "mean_wage": float(firm.workforce.wage.mean()),
+            "mean_theta": float(firm.workforce.theta.mean()) if firm.workforce.K > 0 else float("nan"),
+            "mean_wage": float(firm.workforce.wage.mean()) if firm.workforce.K > 0 else float("nan"),
             "n_a_trained": int(firm.workforce.a_trained.sum()),
             "n_review_fired": n_review_fired_period,
             "c_train_lost": c_train_lost_period,
@@ -253,8 +255,7 @@ def run_simulation(firm: Firm, strategy: Callable, T: int | None = None) -> pd.D
 
         # -----------------------------------------------------------------------
         # Step 11.5: tenure increment for ALL workers (Stage 3, D-06)
-        # Replacement workers (tenure=0 after apply_firings_and_replace) end this
-        # period with tenure=1 — they "worked" the full period.
+        # Tenure increment fires even when workforce.K=0 (no-op: empty += 1 is empty).
         # -----------------------------------------------------------------------
         firm.workforce.tenure = firm.workforce.tenure + 1
 
