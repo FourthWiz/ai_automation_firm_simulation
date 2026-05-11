@@ -78,7 +78,8 @@ def greedy_profit(firm: Firm, t: int) -> np.ndarray:
     # NOT a mode property). Slot k covers tasks [k*tpw, (k+1)*tpw) regardless of mode.
     slot_idx = np.arange(p.N) // p.tasks_per_worker  # shape (N,)
     if firm.workforce.K == 0:
-        # All-T degenerate: no workers; score_T has no wage term so value is unused
+        # Stage 5 D-06: kernel-side clamp in simulate.py step 2.5 handles capacity;
+        # this guard is for score-computation only (wage array shape).
         worker_wage = np.full(p.N, p.w, dtype=np.float64)
     else:
         slot_idx_clamped = np.minimum(slot_idx, firm.workforce.K - 1)

@@ -37,7 +37,7 @@ class FirmParams:
     sigma_theta: float = 0.2     # std of log-normal productivity draws; 0 → homogeneous
     theta_min: float = 0.4       # lower clip for theta
     theta_max: float = 1.6       # upper clip for theta
-    corr_w_theta: float = 0.7    # elasticity exponent in wage = w * theta**corr_w_theta * exp(eps); NOT a Pearson r
+    corr_w_theta: float = 0.3    # elasticity exponent in wage = w * (theta^c / mean(theta^c)) * exp(eps - sigma_w^2/2); NOT a Pearson r
     sigma_w: float = 0.05        # multiplicative log-noise std on individual wage
 
     # Phase 1.5 Stage 3 — periodic firing review
