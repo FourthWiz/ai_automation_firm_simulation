@@ -39,6 +39,7 @@ from firm_ai_abm.strategy import (
     greedy_with_switching,
 )
 from firm_ai_abm.dashboard import (
+    fig_pi_per_period_over_time,
     fig_pi_over_time,
     fig_K_over_time,
     fig_mode_mix_area,
@@ -179,7 +180,7 @@ def _build_sidebar() -> tuple:
         tasks_per_worker = st.number_input(
             "tasks_per_worker", min_value=1, max_value=100,
             value=FirmParams().tasks_per_worker, step=1,
-            help="Tasks assigned per worker", key="tasks_per_worker",
+            help="K_workforce = N / tasks_per_worker. Lowering this RAISES K.", key="tasks_per_worker",
         )
 
     # Productivity
@@ -210,7 +211,7 @@ def _build_sidebar() -> tuple:
 
     # Price
     with st.sidebar.expander("Price", expanded=False):
-        p = st.slider("p", 0.5, 2.0, float(FirmParams().p), 0.05,
+        p = st.slider("p", 0.1, 2.0, float(FirmParams().p), 0.05,
                       help="Output price", key="p")
 
     # Strategy meta
@@ -252,10 +253,22 @@ def _build_sidebar() -> tuple:
             help="Review period (inf = disabled)", key="T_review",
         )
         T_review_value = math.inf if T_review_choice == "inf" else float(T_review_choice)
-        firing_threshold = st.slider(
-            "firing_threshold", -1.0, 1.0, float(FirmParams().firing_threshold), 0.05,
-            help="Firing threshold (worker skill relative to mean)", key="firing_threshold",
+        # firing_threshold_ui is in per-task-output units (comparable to q_h ≈ 1.0).
+        # The kernel's surplus is per-worker output minus per-worker wage; per-worker
+        # output ≈ q_h × tasks_per_worker, so the kernel threshold must be scaled.
+        # UI range [-1.0, 1.0] maps to kernel range [-tpw, tpw].
+        # Default 0.0: fire workers whose per-task output < per-worker wage.
+        firing_threshold_ui = st.slider(
+            "firing_threshold", -1.0, 1.0, 0.0, 0.05,
+            help=(
+                "Per-task surplus threshold. Workers fired when "
+                "(mean output / tasks_per_worker − wage) < threshold. "
+                "0 = fire negative-surplus workers; increase toward 1 to fire more."
+            ),
+            key="firing_threshold",
         )
+        # Convert UI (per-task) → kernel (per-worker) by multiplying by tasks_per_worker
+        firing_threshold_kernel = float(firing_threshold_ui) * int(tasks_per_worker)
 
     # Seed (D-02: default 0, not None)
     seed = st.sidebar.number_input(
@@ -287,7 +300,7 @@ def _build_sidebar() -> tuple:
         corr_w_theta=float(corr_w_theta),
         sigma_w=float(sigma_w),
         T_review=T_review_value,
-        firing_threshold=float(firing_threshold),
+        firing_threshold=firing_threshold_kernel,
         seed=int(seed),
     )
     key = params_to_key(draft_params, int(seed))
@@ -336,10 +349,20 @@ def main() -> None:
     # Cache miss: new computed_at (function body ran, new timestamp).
     st.session_state["RUN_COUNTER_VAL_THIS_RUN"] = computed_at
 
+    # Stage 5 T-09: cascade warning when workforce drops >50% during run
+    k_initial = int(df["K_active"].iloc[0])
+    k_final = int(df["K_active"].iloc[-1])
+    if k_initial > 0 and k_final < 0.5 * k_initial:
+        st.warning(
+            f"Workforce dropped >50% during run (K_initial={k_initial}, K_final={k_final}) — "
+            "try a lower firing_threshold."
+        )
+
     # 4 rows × 2 columns layout (D-07, proc:T-06)
     row1_left, row1_right = st.columns(2)
     with row1_left:
-        st.pyplot(fig_pi_over_time(df))
+        # Stage 5 D-10: per-period profit replaces cumulative in row1_left
+        st.pyplot(fig_pi_per_period_over_time(df))
     with row1_right:
         st.pyplot(fig_K_over_time(df))
 
@@ -357,24 +380,35 @@ def main() -> None:
 
     row4_left, row4_right = st.columns(2)
     with row4_left:
-        st.pyplot(fig_firing_events(df))
+        st.pyplot(fig_firing_events(df, T_review=float(active_key[20])))
     with row4_right:
         st.pyplot(fig_trained_capital(df))
 
     # Footer
     theta_arr = np.array(theta_final)
     wages_arr = np.array(wages_final)
+    total_firings = int(df["n_review_fired"].sum()) if "n_review_fired" in df.columns else 0
+    final_k_active = int(df["K_active"].iloc[-1]) if "K_active" in df.columns else 0
+    final_pi = float(df["pi"].cumsum().iloc[-1])
+
     if len(theta_arr) > 1 and len(wages_arr) > 1 and np.all(wages_arr > 0):
         realized_corr = float(np.corrcoef(theta_arr, np.log(wages_arr))[0, 1])
     else:
         realized_corr = float("nan")
-    final_pi = float(df["pi"].cumsum().iloc[-1])
-    st.caption(
-        f"corr(theta, log(wage)) = {realized_corr:.4f}"
-        f"    final cumulative profit = {final_pi:.4f}"
-    )
+
+    # Stage 5 T-09: NaN guard when K dropped to 0
+    if math.isnan(realized_corr) and final_k_active == 0:
+        st.caption(
+            "corr = N/A (workforce dropped to K=0; consider reducing firing_threshold)"
+            f"    total firings = {total_firings}    final K_active = {final_k_active}"
+        )
+    else:
+        st.caption(
+            f"corr(theta, log(wage)) = {realized_corr:.4f}"
+            f"    final cumulative profit = {final_pi:.4f}"
+            f"    total firings = {total_firings}    final K_active = {final_k_active}"
+        )
     # Show cache-hit observability via RUN_COUNTER.
-    # In the live app, RUN_COUNTER[0] increments on actual computation.
     st.caption(f"sim invocations this session: {RUN_COUNTER[0]}")
 
 
