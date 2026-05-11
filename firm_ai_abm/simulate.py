@@ -72,9 +72,15 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
 
     params = firm.params
 
-    # Pre-loop: allocate output_per_worker matrix (fresh for this call)
+    # Pre-loop: allocate per-worker matrices (fresh for this call)
     K_max = params.N // params.tasks_per_worker
     output_per_worker = np.full((horizon, K_max), np.nan, dtype=np.float64)
+    # aug_cost_per_worker mirrors output_per_worker shape/semantics.
+    # Populated at Step 6 via a SEPARATE cost_vec call (D-07: two independent calls
+    # per period; Step 7 call is unchanged to preserve byte-identity of task_costs,
+    # C, and pi under dormant T_review=inf default). Two cost_vec calls per tick
+    # by design — see decision-thirteen in review.py module docstring.
+    aug_cost_per_worker = np.full((horizon, K_max), np.nan, dtype=np.float64)
 
     local_history: list[dict] = []
 
@@ -83,13 +89,13 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
         # Step 0: periodic firing review (START-OF-PERIOD)
         # -------------------------------------------------------------------
         fire_indices, c_train_lost_period = firing_review(
-            firm.workforce, t, output_per_worker, params
+            firm.workforce, t, output_per_worker, aug_cost_per_worker, params
         )
         n_review_fired_period = int(len(fire_indices))
         period_review_fire_cost = float(params.c_fire) * n_review_fired_period
         if n_review_fired_period > 0:
-            firm.workforce, output_per_worker = apply_firings(
-                firm, fire_indices, t, output_per_worker
+            firm.workforce, output_per_worker, aug_cost_per_worker = apply_firings(
+                firm, fire_indices, t, output_per_worker, aug_cost_per_worker
             )
 
         # -------------------------------------------------------------------
@@ -103,8 +109,8 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
             # workers are NOT the same individuals who were fired. Wage mean can drift
             # over many fire+rehire cycles per workers.py drift semantics.
             K_before_hire = firm.workforce.K
-            firm.workforce, output_per_worker = replace_to_target(
-                firm, firm.K0, t, output_per_worker
+            firm.workforce, output_per_worker, aug_cost_per_worker = replace_to_target(
+                firm, firm.K0, t, output_per_worker, aug_cost_per_worker
             )
             n_hired_period = firm.workforce.K - K_before_hire
             period_hire_cost = float(params.c_hire) * n_hired_period
@@ -179,7 +185,18 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
             output_this_period[k] = float(prod_per_task[t2w == k].sum())
         output_per_worker[t, : firm.workforce.K] = output_this_period
 
-        # Step 7: per-task variable costs
+        # Per-worker aug-cost bookkeeping (D-07: SEPARATE cost_vec call; Step 7 unchanged)
+        # T-mode tasks have t2w == -1 → excluded by worker_mask automatically.
+        # Training-period A tasks: cost_vec returns 0 → aug_cost recorded as 0.0 (Q-02 / MAJ-5).
+        cost_per_task_aug = cost_vec(firm.modes, params, a_in_training_per_task=a_itp)
+        aug_cost_this_period = np.full(firm.workforce.K, np.nan, dtype=np.float64)
+        for k in active_workers:
+            worker_mask = (t2w == k)
+            aug_cost_this_period[k] = float(cost_per_task_aug[worker_mask].sum())
+        aug_cost_per_worker[t, : firm.workforce.K] = aug_cost_this_period
+
+        # Step 7: per-task variable costs (UNCHANGED — D-07: independent call preserves
+        # byte-identity of task_costs, C, and pi under dormant T_review=inf default)
         task_costs = float(cost_vec(firm.modes, params, a_in_training_per_task=a_itp).sum())
 
         # Step 8: wage bill from ASSIGNED workers only
@@ -222,6 +239,7 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
             firm.workforce.a_training_in_progress[:] = False
 
     firm.output_per_worker = output_per_worker  # type: ignore[attr-defined]
+    firm.aug_cost_per_worker = aug_cost_per_worker  # type: ignore[attr-defined]
     return pd.DataFrame(local_history)
 
 
