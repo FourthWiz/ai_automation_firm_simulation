@@ -41,9 +41,13 @@ Runs the Phase 1 validation checks (constant baseline, greedy dominance, monoton
 
 Runs the full test suite (Phase 1 kernel tests + Phase 1.5 stage tests + dashboard tests).
 
+## Default recalibration (Stage 6)
+
+Defaults recalibrated: `tasks_per_worker=5`, `p=0.22` (F unchanged at 5.0). All-H baseline is intentionally loss-making at these params (≈ −3 per period); strategies that augment or automate tasks improve profit materially. Set `tasks_per_worker=10, p=1.0` in tests that depend on Stage 1–5 numerical fixtures.
+
 ## Margin calibration recipe
 
-Default params produce very high margins (~80–90%) because the task/worker leverage is large (100 tasks, 10 workers). Use this recipe to explore near-realistic margins:
+At `tasks_per_worker=10, p=1.0` (legacy numerics), margins are very high (~80–90%) due to task/worker leverage. Use this recipe to explore near-realistic margins:
 
 1. Set `w` to `8.0` (raise wage pressure).
 2. Set `c_auto` to `0.6` (default 0.4 leaves margins too high at scale).

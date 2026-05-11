@@ -40,6 +40,7 @@ def productivity_vec(
     beta: np.ndarray,
     params: FirmParams,
     theta_per_task: np.ndarray | None = None,
+    a_in_training_per_task: np.ndarray | None = None,
 ) -> np.ndarray:
     """Return per-task productivity for each task, shape (N,), dtype float64.
 
@@ -48,7 +49,9 @@ def productivity_vec(
     T  -> q_a * alpha_i                                 (T unaffected by theta)
 
     theta_per_task=None (default) reduces to Phase 1 behavior exactly (byte-identical).
-    theta_per_task=np.ones(N) produces identical output to None.
+    a_in_training_per_task=None (default) gives byte-identical output.
+    When a_in_training_per_task[i]=True for an A-task: uses H formula (no aug bonus)
+    for that period (worker is still in training — delay enabled path only).
 
     Kernel invariants (assert, not raise — these are call-site preconditions):
       - modes must have integer dtype
@@ -72,15 +75,28 @@ def productivity_vec(
     p = np.where(modes == Mode.H, params.q_h * theta_per_task, 0.0)
     p = np.where(modes == Mode.A, params.q_h * (1.0 + params.g * beta) * theta_per_task, p)
     p = np.where(modes == Mode.T, params.q_a * alpha, p)
+    if a_in_training_per_task is not None:
+        # In-training A-tasks produce at H rate — no aug bonus yet
+        training_mask = (modes == Mode.A) & a_in_training_per_task
+        p = np.where(training_mask, params.q_h * theta_per_task, p)
     return p.astype(np.float64)
 
 
-def cost_vec(modes: np.ndarray, params: FirmParams) -> np.ndarray:
+def cost_vec(
+    modes: np.ndarray,
+    params: FirmParams,
+    a_in_training_per_task: np.ndarray | None = None,
+) -> np.ndarray:
     """Return per-task variable cost for each task, shape (N,), dtype float64.
 
     H  -> 0.0          (wages charged per worker in simulate.py, not per task)
     A  -> c_aug        (per-task augmentation tool cost)
     T  -> c_auto       (per-task automation infrastructure cost)
+
+    a_in_training_per_task=None (default) gives byte-identical output.
+    When a_in_training_per_task[i]=True for an A-task: c_aug is NOT charged
+    (worker produces as H during training — no aug tool cost this period).
+    c_train is still charged separately via adj_cost.
 
     NOTE: There is NO w/N term here. Per architecture D-01, wages are charged
     as w * K in simulate.run_simulation. Adding w/N here would double-count.
@@ -98,6 +114,9 @@ def cost_vec(modes: np.ndarray, params: FirmParams) -> np.ndarray:
     c = np.where(modes == Mode.H, 0.0, 0.0)
     c = np.where(modes == Mode.A, params.c_aug, c)
     c = np.where(modes == Mode.T, params.c_auto, c)
+    if a_in_training_per_task is not None:
+        # In-training A-tasks: tool not meaningfully used → zero c_aug this period
+        c = np.where((modes == Mode.A) & a_in_training_per_task, 0.0, c)
     return c.astype(np.float64)
 
 
@@ -110,7 +129,7 @@ def _compute_K_table_check() -> None:
     Not called at import time. Not in __all__. Phase 4 will migrate this to
     a pytest module when tests/ is created (R-11).
     """
-    params = FirmParams(tasks_per_worker=10)
+    params = FirmParams(tasks_per_worker=10, p=1.0)
 
     # (n_HA, expected_K) pairs
     cases = [(0, 0), (9, 1), (10, 1), (11, 2), (100, 10), (101, 11)]
