@@ -38,6 +38,7 @@ from firm_ai_abm.strategy import (
     greedy_profit,
     greedy_with_switching,
 )
+from firm_ai_abm.margin_optimizer import target_margin_strategy
 from firm_ai_abm.dashboard import (
     fig_pi_per_period_over_time,
     fig_pi_over_time,
@@ -60,9 +61,12 @@ _STRATEGY_REGISTRY = {
     "all_T": all_T,
     "greedy_profit": greedy_profit,
     "greedy_with_switching": greedy_with_switching,
+    "target_margin": target_margin_strategy,
 }
 
-# 22 scalar FirmParams fields in order (excludes 'seed' which is appended separately)
+# 26 scalar FirmParams fields in order (excludes 'seed' which is appended separately)
+# Indices: 0=N, 20=T_review, 21=firing_threshold, 22=scenario_mode,
+#          23=target_margin, 24=margin_horizon, 25=enable_training_delay, -1=seed
 _PARAM_FIELDS = (
     "N", "T", "tasks_per_worker",
     "q_h", "q_a", "g",
@@ -71,21 +75,19 @@ _PARAM_FIELDS = (
     "n_amortize",
     "sigma_theta", "theta_min", "theta_max", "corr_w_theta", "sigma_w",
     "T_review", "firing_threshold",
+    "scenario_mode", "target_margin", "margin_horizon", "enable_training_delay",
 )
 
 
 def params_to_key(params: FirmParams, seed: int) -> tuple:
-    """Build a 23-tuple cache key from a FirmParams instance and seed.
+    """Build a 27-tuple cache key from a FirmParams instance and seed.
 
-    The tuple contains only Python scalars (int, float). math.inf is
+    The tuple contains only Python scalars (int, float, bool, str). math.inf is
     included as a float — hash(math.inf) is stable in CPython.
-    seed is appended as the 23rd element.
+    seed is appended as the 27th element.
 
-    Returns:
-        tuple of 23 scalars: (N, T, tasks_per_worker, q_h, q_a, g, w,
-        c_aug, c_auto, c_fire, c_hire, c_train, F, p, n_amortize,
-        sigma_theta, theta_min, theta_max, corr_w_theta, sigma_w,
-        T_review, firing_threshold, seed)
+    Indices: 0=N, 20=T_review, 21=firing_threshold, 22=scenario_mode,
+             23=target_margin, 24=margin_horizon, 25=enable_training_delay, -1=seed
     """
     values = tuple(getattr(params, f) for f in _PARAM_FIELDS)
     return values + (seed,)
@@ -112,9 +114,9 @@ def run_cached(params_key: tuple, strategy_name: str) -> tuple:
     """Run the simulation for the given params key and strategy.
 
     Args:
-        params_key: 23-tuple of scalars from params_to_key(). The 23rd
-            element is the seed (int). The 22nd element is firing_threshold.
-            The 21st is T_review (float, possibly math.inf).
+        params_key: 27-tuple from params_to_key(). The last element is seed.
+            Indices 20=T_review, 21=firing_threshold, 22=scenario_mode,
+            23=target_margin, 24=margin_horizon, 25=enable_training_delay.
         strategy_name: key into _STRATEGY_REGISTRY.
 
     Returns:
@@ -160,12 +162,20 @@ def _build_sidebar() -> tuple:
     """
     st.sidebar.title("FirmBehavior dashboard")
 
-    # Strategy selector — default to greedy_profit (index 3)
-    strategy = st.sidebar.radio(
-        "Strategy",
-        list(_STRATEGY_REGISTRY.keys()),
-        index=3,
-    )
+    # Scenario selector — comes before strategy (T-09)
+    scenario = st.sidebar.radio("Scenario", ["price", "margin"], index=0, key="scenario")
+
+    if scenario == "margin":
+        # Hide strategy radio in margin mode; strategy is forced to target_margin
+        st.sidebar.markdown("Strategy: target_margin (auto)")
+        strategy = "target_margin"
+    else:
+        # Strategy selector — default to greedy_profit (index 3)
+        strategy = st.sidebar.radio(
+            "Strategy",
+            [k for k in _STRATEGY_REGISTRY if k != "target_margin"],
+            index=3,
+        )
 
     # Counts — use exact field names as labels (required for test_sidebar_all_param_fields_present)
     with st.sidebar.expander("Counts", expanded=True):
@@ -270,6 +280,29 @@ def _build_sidebar() -> tuple:
         # Convert UI (per-task) → kernel (per-worker) by multiplying by tasks_per_worker
         firing_threshold_kernel = float(firing_threshold_ui) * int(tasks_per_worker)
 
+    # Margin scenario (T-09)
+    with st.sidebar.expander("Margin scenario", expanded=False):
+        target_margin_val = st.slider(
+            "target_margin", 0.0, 0.5, float(FirmParams().target_margin), 0.01,
+            help="Target (revenue − cost) / revenue for the margin-optimizer strategy",
+            key="target_margin",
+        )
+        margin_horizon_val = st.number_input(
+            "margin_horizon", min_value=1, max_value=20,
+            value=FirmParams().margin_horizon, step=1,
+            help="Look-ahead periods for margin-optimizer brute grid",
+            key="margin_horizon",
+        )
+
+    # Training (T-09 — dashboard default True; FirmParams default False — deliberate seam D-01)
+    with st.sidebar.expander("Training", expanded=False):
+        enable_training_delay_val = st.checkbox(
+            "enable_training_delay",
+            value=True,
+            help="When enabled, H→A workers produce at H-rate for 1 period before augmentation kicks in.",
+            key="enable_training_delay",
+        )
+
     # Seed (D-02: default 0, not None)
     seed = st.sidebar.number_input(
         "Seed", min_value=0, value=0, step=1,
@@ -301,6 +334,10 @@ def _build_sidebar() -> tuple:
         sigma_w=float(sigma_w),
         T_review=T_review_value,
         firing_threshold=firing_threshold_kernel,
+        scenario_mode=scenario,
+        target_margin=float(target_margin_val),
+        margin_horizon=int(margin_horizon_val),
+        enable_training_delay=bool(enable_training_delay_val),
         seed=int(seed),
     )
     key = params_to_key(draft_params, int(seed))
@@ -317,8 +354,6 @@ def main() -> None:
 
     strategy, params_key, draft_params = _build_sidebar()
 
-    st.caption(f"Strategy: {strategy} — seed: {params_key[-1]}")
-
     # Run button — gate the simulation (D-04: no auto-rerun on slider change)
     run_clicked = st.button("Run", type="primary")
 
@@ -333,6 +368,12 @@ def main() -> None:
 
     active_key = st.session_state["last_run_key"]
     active_strategy = st.session_state["last_strategy"]
+
+    # T-10: stale-run banner — warn when current params differ from last run
+    if (params_key != st.session_state["last_run_key"]) or (strategy != st.session_state["last_strategy"]):
+        st.warning("Params changed — press Run to refresh", icon="⚠️")
+
+    st.caption(f"Strategy: {active_strategy} — seed: {active_key[-1]}")
 
     # Run simulation (or return cached result).
     # computed_at is a monotonic timestamp captured at actual computation time.
