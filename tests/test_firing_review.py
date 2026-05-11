@@ -58,8 +58,13 @@ def _make_fake_workforce(theta, wage, a_trained=None, tenure=None, hire_t=None):
 
 
 def _default_params(**kwargs):
-    """Return FirmParams with sigma_theta=0, sigma_w=0 and any overrides."""
-    return FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0, **kwargs)
+    """Return FirmParams with sigma_theta=0, sigma_w=0 and any overrides.
+
+    Pins tasks_per_worker=10, p=1.0 by default to preserve Stage 1–2 fixtures.
+    """
+    defaults = {"tasks_per_worker": 10, "p": 1.0}
+    defaults.update(kwargs)
+    return FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0, **defaults)
 
 
 # ---------------------------------------------------------------------------
@@ -431,8 +436,8 @@ def test_T14_T_review_inf_equals_T_review_999():
         ("greedy_with_switching", greedy_with_switching),
     ]
 
-    params_inf = FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0, T_review=math.inf)
-    params_999 = FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0, T_review=999.0)
+    params_inf = FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0, T_review=math.inf, tasks_per_worker=10, p=1.0)
+    params_999 = FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0, T_review=999.0, tasks_per_worker=10, p=1.0)
 
     for strat_name, strat in strategies:
         firm_inf = make_firm(params_inf)
@@ -561,6 +566,8 @@ def test_T16_numeraire_invariance_with_firing_active():
         T=20,
         T_review=10.0,
         firing_threshold=0.0,
+        tasks_per_worker=10,
+        p=1.0,
     )
 
     SCALED = ("w", "c_aug", "c_auto", "c_fire", "c_hire", "c_train", "F", "p")
@@ -614,6 +621,8 @@ def test_T17_greedy_gaming_smoke_no_firing_cascade():
         firing_threshold=0.0,
         sigma_theta=0.2,
         sigma_w=0.05,
+        tasks_per_worker=10,
+        p=1.0,
     )
     K = params.N // params.tasks_per_worker  # 10
 
