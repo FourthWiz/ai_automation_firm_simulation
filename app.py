@@ -23,6 +23,7 @@ import dataclasses
 import math
 import time
 import traceback
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -50,7 +51,7 @@ from firm_ai_abm.dashboard import (
     fig_firing_events,
     fig_trained_capital,
     fig_wage_histogram,
-    fig_wage_vs_cumulative_output,
+    fig_wage_vs_mean_output,
     fig_hiring_events,
 )
 
@@ -191,7 +192,7 @@ def _build_sidebar() -> tuple:
     # Counts — use exact field names as labels (required for test_sidebar_all_param_fields_present)
     with st.sidebar.expander("Counts", expanded=True):
         N = st.number_input(
-            "N", min_value=1, max_value=500, value=FirmParams().N, step=10,
+            "N", min_value=1, max_value=1000, value=500, step=10,
             help="Number of tasks per firm", key="N",
         )
         T = st.number_input(
@@ -452,16 +453,18 @@ def main() -> None:
     with row5_right:
         opw_arr = np.array(output_per_worker_list)
         K_active_final = int(df["K_active"].iloc[-1])
-        # NaN-sum cumulative output per worker over all periods, active workers only
-        cum_opw = np.nansum(opw_arr[:, :K_active_final], axis=0) if K_active_final > 0 else np.array([])
-        # Mark workers with all-NaN output as NaN (excluded from scatter)
         if K_active_final > 0:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                mean_opw = np.nanmean(opw_arr[:, :K_active_final], axis=0)
             all_nan_mask = np.all(np.isnan(opw_arr[:, :K_active_final]), axis=0)
-            cum_opw[all_nan_mask] = np.nan
+            mean_opw[all_nan_mask] = np.nan
+        else:
+            mean_opw = np.array([])
         a_trained_arr = np.array(a_trained_final[:K_active_final], dtype=bool) if K_active_final > 0 else np.array([], dtype=bool)
-        st.pyplot(fig_wage_vs_cumulative_output(
+        st.pyplot(fig_wage_vs_mean_output(
             np.array(wages_final[:K_active_final]),
-            cum_opw,
+            mean_opw,
             a_trained_arr,
         ))
 
@@ -469,7 +472,8 @@ def main() -> None:
     with row6_left:
         enable_hiring_active = bool(active_key[26])  # index 26 = enable_hiring
         st.pyplot(fig_hiring_events(df, enable_hiring=enable_hiring_active))
-    # row6_right is empty — reserved for Phase 2
+    with row6_right:
+        st.pyplot(fig_pi_over_time(df))
 
     # Footer
     theta_arr = np.array(theta_final)

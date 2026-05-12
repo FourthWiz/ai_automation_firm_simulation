@@ -67,14 +67,26 @@ def _default_params(**kwargs):
     return FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0, **defaults)
 
 
+def _make_zero_acpw(opw: np.ndarray) -> np.ndarray:
+    """Build an aug_cost_per_worker matrix matching opw shape: 0.0 where opw is not NaN."""
+    acpw = np.full_like(opw, np.nan, dtype=np.float64)
+    acpw[~np.isnan(opw)] = 0.0
+    return acpw
+
+
 # ---------------------------------------------------------------------------
 # T-08: fire negative-surplus, keep positive-surplus; c_train_lost accounting
 # ---------------------------------------------------------------------------
 
 
 def test_T08_firing_review_fires_negative_surplus():
-    """firing_review fires only negative-surplus workers (surplus < 0)."""
-    params = _default_params(T_review=10.0, firing_threshold=0.0)
+    """firing_review fires only negative-surplus workers (surplus < 0).
+
+    F=0.0 so F-share does not affect the fire mask (isolates wage-vs-revenue logic).
+    Surplus formula: p * mean_output - wage - mean_aug_cost - F/K_review.
+    With F=0 and all H-mode (aug_cost=0): reduces to p * mean_output - wage.
+    """
+    params = _default_params(T_review=10.0, firing_threshold=0.0, F=0.0)
 
     wf = _make_fake_workforce(
         theta=[1.5, 1.0, 0.5],
@@ -86,8 +98,11 @@ def test_T08_firing_review_fires_negative_surplus():
     opw[0:10, 0] = 1.5   # mean 1.5 > wage 1.0 → surplus > 0
     opw[0:10, 1] = 1.0   # mean 1.0 == wage 1.0 → surplus = 0.0 (not < 0)
     opw[0:10, 2] = 0.4   # mean 0.4 < wage 1.0 → surplus = -0.6 < 0 → fired
+    acpw = _make_zero_acpw(opw)
 
-    fire_indices, c_train_lost = firing_review(wf, t=10, output_per_worker=opw, params=params)
+    fire_indices, c_train_lost = firing_review(
+        wf, t=10, output_per_worker=opw, aug_cost_per_worker=acpw, params=params
+    )
 
     assert np.array_equal(fire_indices, np.array([2])), (
         f"Expected [2], got {fire_indices}"
@@ -96,8 +111,13 @@ def test_T08_firing_review_fires_negative_surplus():
 
 
 def test_T08_firing_review_c_train_lost_when_trained():
-    """c_train_lost reflects trained-worker count when a_trained=True for fired worker."""
-    params = _default_params(T_review=10.0, firing_threshold=0.0, c_train=5.0)
+    """c_train_lost reflects trained-worker count when a_trained=True for fired worker.
+
+    F=0.0 so only worker 2 fires (surplus = 0.4-1.0-0-0 = -0.6). With default F=5.0
+    and K=3, F_share=1.667 would tip workers 0 and 1 into firing too, changing the
+    expected fire mask.
+    """
+    params = _default_params(T_review=10.0, firing_threshold=0.0, c_train=5.0, F=0.0)
 
     wf = _make_fake_workforce(
         theta=[1.5, 1.0, 0.5],
@@ -108,8 +128,11 @@ def test_T08_firing_review_c_train_lost_when_trained():
     opw[0:10, 0] = 1.5
     opw[0:10, 1] = 1.0
     opw[0:10, 2] = 0.4   # fired
+    acpw = _make_zero_acpw(opw)
 
-    fire_indices, c_train_lost = firing_review(wf, t=10, output_per_worker=opw, params=params)
+    fire_indices, c_train_lost = firing_review(
+        wf, t=10, output_per_worker=opw, aug_cost_per_worker=acpw, params=params
+    )
 
     assert np.array_equal(fire_indices, np.array([2]))
     # 1 trained worker fired × c_train=5.0
@@ -117,12 +140,18 @@ def test_T08_firing_review_c_train_lost_when_trained():
 
 
 def test_T08_firing_review_T_review_inf_returns_empty():
-    """T_review=math.inf → no review, returns empty regardless of surplus."""
+    """T_review=math.inf → no review, returns empty regardless of surplus.
+
+    math.isinf short-circuit fires before reading aug_cost_per_worker (D-11).
+    """
     params = _default_params(T_review=math.inf)
     wf = _make_fake_workforce(theta=[0.1], wage=[10.0])
     opw = np.full((20, 1), -999.0)  # absurdly negative
+    acpw = _make_zero_acpw(opw)
 
-    fire_indices, c_train_lost = firing_review(wf, t=10, output_per_worker=opw, params=params)
+    fire_indices, c_train_lost = firing_review(
+        wf, t=10, output_per_worker=opw, aug_cost_per_worker=acpw, params=params
+    )
     assert fire_indices.size == 0
     assert c_train_lost == 0.0
 
@@ -133,28 +162,33 @@ def test_T08_firing_review_T_review_inf_returns_empty():
 
 
 def test_T09_surplus_calculation_correctness():
-    """Surplus = p * mean_output − wage (test uses p=1.0 so numerically equivalent to old formula, but verifies price-scaled formula is in place); firing depends on threshold."""
-    params_base = _default_params(T_review=10.0)
+    """Surplus = p * mean_output - wage - mean_aug_cost - F/K_review.
+
+    F=0.0 and aug_cost=0 so formula reduces to p*mean_output - wage, letting us
+    verify the price-scaled revenue term in isolation.
+    surplus[0] = 1.0*1.8 - 2.0 - 0 - 0 = -0.2; surplus[1] = 1.0*0.6 - 0.5 - 0 - 0 = 0.1.
+    """
+    params_base = _default_params(T_review=10.0, F=0.0)
     wf = _make_fake_workforce(theta=[1.0, 1.0], wage=[2.0, 0.5])
 
     opw = np.full((20, 2), np.nan)
     opw[0:10, 0] = np.array([1.0, 2.0, 3.0, 1.0, 2.0, 1.0, 2.0, 3.0, 1.0, 2.0])  # mean=1.8
     opw[0:10, 1] = 0.6   # mean=0.6
+    acpw = _make_zero_acpw(opw)
 
-    # surplus[0] = 1.8 - 2.0 = -0.2; surplus[1] = 0.6 - 0.5 = 0.1
     # threshold=0.0: fire worker 0 (surplus=-0.2 < 0)
     params_0 = replace(params_base, firing_threshold=0.0)
-    fire_0, _ = firing_review(wf, t=10, output_per_worker=opw, params=params_0)
+    fire_0, _ = firing_review(wf, t=10, output_per_worker=opw, aug_cost_per_worker=acpw, params=params_0)
     assert np.array_equal(fire_0, np.array([0])), f"Expected [0], got {fire_0}"
 
     # threshold=-0.5: both surplus above -0.5 → no firing
     params_neg = replace(params_base, firing_threshold=-0.5)
-    fire_neg, _ = firing_review(wf, t=10, output_per_worker=opw, params=params_neg)
+    fire_neg, _ = firing_review(wf, t=10, output_per_worker=opw, aug_cost_per_worker=acpw, params=params_neg)
     assert fire_neg.size == 0, f"Expected empty, got {fire_neg}"
 
     # threshold=0.05: worker 0 still fired (surplus=-0.2 < 0.05); worker 1 not (surplus=0.1 >= 0.05)
     params_pos = replace(params_base, firing_threshold=0.05)
-    fire_pos, _ = firing_review(wf, t=10, output_per_worker=opw, params=params_pos)
+    fire_pos, _ = firing_review(wf, t=10, output_per_worker=opw, aug_cost_per_worker=acpw, params=params_pos)
     assert np.array_equal(fire_pos, np.array([0])), f"Expected [0], got {fire_pos}"
 
 
@@ -179,9 +213,12 @@ def test_T10a_apply_firings_drops_K_and_reindexes_tenure():
 
     K_max = params.N // params.tasks_per_worker
     opw = np.full((params.T, K_max), np.nan, dtype=np.float64)
+    acpw = _make_zero_acpw(opw)
     fire_indices = np.array([1, 3], dtype=int)
 
-    new_wf, new_opw = apply_firings(firm, fire_indices, t=10, output_per_worker=opw)
+    new_wf, new_opw, new_acpw = apply_firings(
+        firm, fire_indices, t=10, output_per_worker=opw, aug_cost_per_worker=acpw
+    )
 
     # Stage 5 D-03: K DROPS (was 5, fired 2 → K=3)
     assert new_wf.K == 5 - len(fire_indices), (
@@ -193,9 +230,12 @@ def test_T10a_apply_firings_drops_K_and_reindexes_tenure():
         f"Expected non-increasing tenure, got {new_wf.tenure}"
     )
 
-    # Trailing inactive columns [new_wf.K : K_max] must be all-NaN
+    # Trailing inactive columns [new_wf.K : K_max] must be all-NaN in both arrays
     assert np.all(np.isnan(new_opw[:, new_wf.K:])), (
-        "Trailing columns after K_new must be all-NaN"
+        "Trailing columns after K_new must be all-NaN in output_per_worker"
+    )
+    assert new_acpw.shape == new_opw.shape, (
+        f"aug_cost shape {new_acpw.shape} must match output shape {new_opw.shape}"
     )
 
 
@@ -214,14 +254,19 @@ def test_T10b_replace_to_target_restores_K():
 
     K_max = params.N // params.tasks_per_worker
     opw = np.full((params.T, K_max), np.nan, dtype=np.float64)
+    acpw = _make_zero_acpw(opw)
     fire_indices = np.array([1, 3], dtype=int)
 
-    new_wf, new_opw = apply_firings(firm, fire_indices, t=10, output_per_worker=opw)
+    new_wf, new_opw, new_acpw = apply_firings(
+        firm, fire_indices, t=10, output_per_worker=opw, aug_cost_per_worker=acpw
+    )
     assert new_wf.K == 3
 
     # replace_to_target restores K to 5
     firm.workforce = new_wf
-    restored_wf, restored_opw = replace_to_target(firm, K_target=5, t=10, output_per_worker=new_opw)
+    restored_wf, restored_opw, restored_acpw = replace_to_target(
+        firm, K_target=5, t=10, output_per_worker=new_opw, aug_cost_per_worker=new_acpw
+    )
     assert restored_wf.K == 5, f"Expected K=5 after replace_to_target, got {restored_wf.K}"
 
     # Descending tenure preserved after combine+reorder
@@ -239,9 +284,12 @@ def test_T10b_replace_to_target_restores_K():
     # No-op fast-path: empty fire_indices → apply_firings returns SAME objects (identity)
     empty_fire = np.array([], dtype=int)
     firm2 = make_firm(params)
-    ret_wf, ret_opw = apply_firings(firm2, empty_fire, t=5, output_per_worker=opw)
+    ret_wf, ret_opw, ret_acpw = apply_firings(
+        firm2, empty_fire, t=5, output_per_worker=opw, aug_cost_per_worker=acpw
+    )
     assert ret_wf is firm2.workforce, "Empty fire_indices must return same workforce (identity)"
     assert ret_opw is opw, "Empty fire_indices must return same opw (identity)"
+    assert ret_acpw is acpw, "Empty fire_indices must return same acpw (identity)"
 
 
 def test_T10_run_simulation_K_drops_at_review_period():
@@ -301,6 +349,7 @@ def test_T12_replacement_worker_initial_state():
     tenure=0, hire_t=t, a_trained=False.
 
     Sequence (proc:T-13): apply_firings → firm.workforce = new_wf → replace_to_target.
+    F_share = F/K_max = 5.0/10 = 0.5. surplus = 0.0 - 1.0 - 0 - 0.5 = -1.5 < 10 threshold → all fired.
     """
     params = _default_params(T=20, T_review=10.0, firing_threshold=10.0)
     firm = make_firm(params)
@@ -308,16 +357,23 @@ def test_T12_replacement_worker_initial_state():
     K_max = params.N // params.tasks_per_worker
     opw = np.full((params.T, K_max), np.nan, dtype=np.float64)
     # Fill first 10 rows with sub-threshold output so all workers get fired
-    opw[0:10, :K_max] = 0.0  # output=0, wage=1.0, surplus=-1 < 10 threshold → all fired
+    opw[0:10, :K_max] = 0.0  # output=0, wage=1.0, F_share=0.5, surplus=-1.5 < 10 → all fired
+    acpw = _make_zero_acpw(opw)
 
-    fire_indices, _ = firing_review(firm.workforce, t=10, output_per_worker=opw, params=params)
+    fire_indices, _ = firing_review(
+        firm.workforce, t=10, output_per_worker=opw, aug_cost_per_worker=acpw, params=params
+    )
     assert fire_indices.size == K_max, f"Expected all {K_max} workers fired, got {fire_indices.size}"
 
     # Stage 5: apply_firings (K drops to 0) then replace_to_target (restore K)
-    new_wf, new_opw = apply_firings(firm, fire_indices, t=10, output_per_worker=opw)
+    new_wf, new_opw, new_acpw = apply_firings(
+        firm, fire_indices, t=10, output_per_worker=opw, aug_cost_per_worker=acpw
+    )
     assert new_wf.K == 0, f"After firing all, K should be 0; got {new_wf.K}"
     firm.workforce = new_wf  # update in-place for replace_to_target
-    restored_wf, _ = replace_to_target(firm, K_target=K_max, t=10, output_per_worker=new_opw)
+    restored_wf, _, _ = replace_to_target(
+        firm, K_target=K_max, t=10, output_per_worker=new_opw, aug_cost_per_worker=new_acpw
+    )
 
     # All replacements should have tenure=0 immediately (before the step-11.5 increment)
     assert np.all(restored_wf.tenure == 0), (
@@ -459,8 +515,12 @@ def test_T14_T_review_inf_equals_T_review_999():
 
 
 def test_T15_subtest1_all_nan_column_no_RuntimeWarning():
-    """Sub-test 1: all-NaN worker column does not produce RuntimeWarning and is not fired."""
-    params = _default_params(T_review=10.0, firing_threshold=0.0)
+    """Sub-test 1: all-NaN worker column does not produce RuntimeWarning and is not fired.
+
+    F=0.0 so workers 1 and 2 retain positive surplus (surplus = output - wage - 0 - 0 > 0).
+    With default F=5.0 and K=3, F_share=1.667 would push workers 1 and 2 negative.
+    """
+    params = _default_params(T_review=10.0, firing_threshold=0.0, F=0.0)
 
     K = 3
     wf = _make_fake_workforce(
@@ -474,11 +534,14 @@ def test_T15_subtest1_all_nan_column_no_RuntimeWarning():
     # Workers 1 and 2: positive output
     opw[0:10, 1] = 1.0   # mean=1.0, surplus=0.5 > 0 → safe
     opw[0:10, 2] = 0.8   # mean=0.8, surplus=0.3 > 0 → safe
+    acpw = _make_zero_acpw(opw)
 
     # Assert no RuntimeWarning from the per-column mask approach (CRIT-1 pin)
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        fire_indices, _ = firing_review(wf, t=10, output_per_worker=opw, params=params)
+        fire_indices, _ = firing_review(
+            wf, t=10, output_per_worker=opw, aug_cost_per_worker=acpw, params=params
+        )
         runtime_warnings = [x for x in w if issubclass(x.category, RuntimeWarning)]
         assert not runtime_warnings, (
             f"RuntimeWarning(s) emitted: {[str(x.message) for x in runtime_warnings]}"
@@ -530,22 +593,30 @@ def test_T15_subtest2_pre_hire_NaN_with_replace_to_target():
 
 
 def test_T15_subtest3_dropped_columns_become_NaN():
-    """Sub-test 3 (Stage 5 NEW): after bare apply_firings (no replace), trailing cols are NaN."""
+    """Sub-test 3 (Stage 5 NEW): after bare apply_firings (no replace), trailing cols are NaN.
+
+    Both output_per_worker and aug_cost_per_worker must have all-NaN in dropped columns.
+    """
     params = _default_params(T=20, T_review=10.0, firing_threshold=10.0)
     firm = make_firm(params)
 
     K_max = params.N // params.tasks_per_worker
-    opw = np.full((params.T, K_max), 1.0, dtype=np.float64)  # non-NaN to show the wipe
+    opw = np.full((params.T, K_max), 1.0, dtype=np.float64)   # non-NaN to show the wipe
+    acpw = np.full((params.T, K_max), 1.0, dtype=np.float64)  # non-NaN to show the wipe
     fire_indices = np.array([0, 1, 2], dtype=int)  # fire first 3 workers
 
-    new_wf, new_opw = apply_firings(firm, fire_indices, t=5, output_per_worker=opw)
+    new_wf, new_opw, new_acpw = apply_firings(
+        firm, fire_indices, t=5, output_per_worker=opw, aug_cost_per_worker=acpw
+    )
 
     assert new_wf.K == firm.workforce.K - 3
 
-    # Trailing inactive columns [new_wf.K : K_max] must be all-NaN
+    # Trailing inactive columns [new_wf.K : K_max] must be all-NaN in both arrays
     assert np.all(np.isnan(new_opw[:, new_wf.K:])), (
-        f"Expected columns [{new_wf.K}:{K_max}] to be all-NaN after apply_firings; "
-        f"got non-NaN values"
+        f"Expected columns [{new_wf.K}:{K_max}] to be all-NaN in output_per_worker"
+    )
+    assert np.all(np.isnan(new_acpw[:, new_wf.K:])), (
+        f"Expected columns [{new_wf.K}:{K_max}] to be all-NaN in aug_cost_per_worker"
     )
 
 
@@ -782,4 +853,230 @@ def test_T16b_numeraire_with_low_p():
             df_base["n_review_fired"].values,
         ), (
             f"T-16b n_review_fired differs at p=0.5 for {name}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# T-09: F-share numeraire invariance (adaptive-firing-surplus regression fence)
+# ---------------------------------------------------------------------------
+
+
+def test_F_share_numeraire():
+    """F_share numeraire invariance: pi_scaled == 2 * pi_base AND fire counts identical.
+
+    Scenario: F=10.0, K0=10, F_share=1.0 per worker. With all_H and sigma=0:
+    effective_surplus = 1.0 * 10 * 1.0 - 1.0 - 0 - 1.0 = 9.0 > 0 → no firings.
+    Under 2× monetary scaling, F_share = 2.0, surplus = 2*10 - 2 - 0 - 2 = 18.0 > 0 → still no firings.
+    pi_scaled must equal exactly 2 * pi_base (R-03 regression fence for the F_share formula).
+    """
+    params_base = FirmParams(
+        seed=0,
+        sigma_theta=0.0,
+        sigma_w=0.0,
+        T=20,
+        T_review=10.0,
+        firing_threshold=0.0,
+        tasks_per_worker=10,
+        p=1.0,
+        F=10.0,
+        c_aug=0.05,
+    )
+
+    SCALED = ("w", "c_aug", "c_auto", "c_fire", "c_hire", "c_train", "F", "p", "firing_threshold")
+    scaled_kwargs = {f: getattr(params_base, f) * 2.0 for f in SCALED}
+    params_scaled = replace(params_base, **scaled_kwargs)
+
+    for strat, name in [(all_H, "all_H"), (all_A, "all_A")]:
+        firm_base = make_firm(params_base)
+        df_base = run_simulation(firm_base, strat)
+
+        firm_scaled = make_firm(params_scaled)
+        df_scaled = run_simulation(firm_scaled, strat)
+
+        assert np.allclose(
+            df_scaled["pi"].values,
+            2.0 * df_base["pi"].values,
+            rtol=1e-10,
+            atol=1e-9,
+        ), (
+            f"T-09 F_share numeraire failed for {name}: "
+            f"max dev = {np.max(np.abs(df_scaled['pi'].values - 2.0 * df_base['pi'].values))}"
+        )
+
+        assert np.array_equal(
+            df_scaled["n_review_fired"].values,
+            df_base["n_review_fired"].values,
+        ), (
+            f"T-09 n_review_fired differs between base and scaled for {name}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# T-10: Single-tick cascade damping (stale-K discrimination test)
+# ---------------------------------------------------------------------------
+
+
+def test_F_share_stale_K_within_tick():
+    """Within one review tick, F_share uses pre-fire K (stale). Discriminating recipe.
+
+    4 workers, F=8.0, K=4, F_share=2.0 (stale K).
+    Worker 0: output=5.0, surplus = 5 - 1 - 0 - 2 = 2.0 (keep)
+    Workers 1/2/3: output=2.5, surplus = 2.5 - 1 - 0 - 2 = -0.5 (fire)
+    Expected fire_indices = [1, 2, 3] (3 workers only).
+
+    np.where returns column-order (ascending-index) results so the assertion is
+    deterministic regardless of mask evaluation order (MIN-2 note).
+
+    If F_share were recomputed after each firing (recursive cascade):
+      after firing worker 1: K=3, F_share=2.67; worker 0 surplus = 5-1-0-2.67 = 1.33 (still keep)
+      after firing worker 2: K=2, F_share=4.0; worker 0 surplus = 5-1-0-4 = 0 (still keep)
+      after firing worker 3: K=1, F_share=8.0; worker 0 surplus = 5-1-0-8 = -4 (fire!)
+    Recursive cascade would fire all 4; stale-K stops at 3.
+    """
+    params = _default_params(T_review=10.0, firing_threshold=0.0, F=8.0)
+    wf = _make_fake_workforce(
+        theta=[1.0, 1.0, 1.0, 1.0],
+        wage=[1.0, 1.0, 1.0, 1.0],
+    )
+    opw = np.full((20, 4), np.nan)
+    opw[0:10, 0] = 5.0   # surplus = 5 - 1 - 0 - (8/4=2) = 2 (keep)
+    opw[0:10, 1] = 2.5   # surplus = 2.5 - 1 - 0 - 2 = -0.5 (fire)
+    opw[0:10, 2] = 2.5   # fire
+    opw[0:10, 3] = 2.5   # fire
+    acpw = np.full_like(opw, 0.0)
+    acpw[np.isnan(opw)] = np.nan
+
+    fire_indices, _ = firing_review(
+        wf, t=10, output_per_worker=opw, aug_cost_per_worker=acpw, params=params
+    )
+    assert np.array_equal(fire_indices, np.array([1, 2, 3])), (
+        f"Expected stale-K firing [1, 2, 3] (3 workers); got {fire_indices}. "
+        f"Per-tick recursive cascade would have fired all 4."
+    )
+
+
+# ---------------------------------------------------------------------------
+# T-11: Hire/fire oscillation guard (enable_hiring + F-share)
+# ---------------------------------------------------------------------------
+
+
+def test_hiring_oscillation_bounded():
+    """Hiring + F-share oscillation is bounded by the tight theoretical maximum.
+
+    With enable_hiring=True, firing can trigger same-period hire-back (Step 0.5).
+    Total hires must not exceed K0 * num_review_ticks where num_review_ticks
+    = (T-1) // T_review (t=0 excluded by firing_review's short-circuit).
+
+    For T=30, T_review=5: actual firing ticks t ∈ {5,10,15,20,25} = 5 ticks.
+    bound = 20 * 5 = 100.
+
+    Also detects sustained full-fire flip-flop: no 3+ consecutive review ticks
+    with n_review_fired == K0 (structural oscillation detector).
+    """
+    params = FirmParams(
+        N=100,
+        T=30,
+        tasks_per_worker=5,
+        T_review=5.0,
+        firing_threshold=0.0,
+        p=0.22,
+        F=5.0,
+        seed=0,
+        sigma_theta=0.2,
+        sigma_w=0.05,
+        enable_hiring=True,
+    )
+    K0 = params.N // params.tasks_per_worker  # 20
+    firm = make_firm(params)
+    df = run_simulation(firm, all_H)
+
+    total_hired = int(df["n_hired"].sum())
+
+    # t=0 excluded by firing_review's short-circuit (review.py:95)
+    # Actual review ticks with firing = (T-1)//T_review, not T//T_review.
+    num_reviews = (params.T - 1) // int(params.T_review)  # 5 (not 6)
+    bound = K0 * num_reviews  # 20 * 5 = 100
+    assert total_hired <= bound, (
+        f"Hiring exceeds theoretical max: total_hired={total_hired} > bound={bound}. "
+        f"T={params.T}, T_review={params.T_review}, num_reviews={num_reviews}, K0={K0}"
+    )
+
+    # Structural flip-flop detector: no 3+ consecutive review ticks with full-workforce fire.
+    # Review rows: t % T_review == 0 (and t > 0 since t=0 is excluded by short-circuit).
+    review_rows = df[(df["t"] % int(params.T_review) == 0) & (df["t"] > 0)]
+    full_fire_ticks = (review_rows["n_review_fired"].values == K0).astype(int)
+    max_run = cur = 0
+    for v in full_fire_ticks:
+        cur = cur + 1 if v else 0
+        max_run = max(max_run, cur)
+    assert max_run <= 2, (
+        f"Sustained full-workforce fire-then-hire-then-fire cycle detected: "
+        f"{max_run} consecutive review ticks with n_review_fired == K0. "
+        f"R-04 oscillation may be unbounded."
+    )
+
+    # Zero-workforce limbo check: no K_active == 0 for >1 consecutive period.
+    zero_k_periods = (df["K_active"] == 0).astype(int).values
+    max_zero_run = cur = 0
+    for v in zero_k_periods:
+        cur = cur + 1 if v else 0
+        max_zero_run = max(max_zero_run, cur)
+    assert max_zero_run <= 1, (
+        f"Workforce stuck at K_active=0 for {max_zero_run} consecutive periods. "
+        f"enable_hiring should restore headcount within the same period."
+    )
+
+
+# ---------------------------------------------------------------------------
+# T-12: Regression neutrality — aug_cost_per_worker dormant under T_review=inf
+# ---------------------------------------------------------------------------
+
+
+def test_aug_cost_neutrality_when_dormant():
+    """With T_review=inf, aug_cost_per_worker is populated but never read by firing_review.
+
+    pi/Y/C columns must be byte-equal to the pre-change baseline captured in
+    check8-pretip.json (before any Stage-7 code edits). This is the dormancy-guarantee
+    regression fence: two cost_vec calls per period (D-07) but Step 7 is unchanged,
+    so task_costs, C, and pi are bit-for-bit identical.
+
+    Falls back to run_tier_a() check8 pass assertion if pretip.json is absent.
+    """
+    import json
+    import pathlib
+
+    pretip_path = pathlib.Path(".workflow_artifacts/adaptive-firing-surplus/check8-pretip.json")
+
+    from firm_ai_abm.validate import run_tier_a
+
+    result = run_tier_a()
+    assert result["check8"]["passed"], (
+        f"check8_stage3_neutrality FAILED post-change (dormancy guarantee broken): "
+        f"{result['check8']['details']}"
+    )
+
+    if pretip_path.exists():
+        # pretip structure: {"passed": bool, "details": {"per_strategy": {...}}}
+        # written by: json.dumps(results.get('check8', {}), default=str)
+        pretip = json.loads(pretip_path.read_text())
+        assert pretip.get("passed", False), (
+            "check8 was already failing before Stage-7 changes (pretip baseline shows failed)"
+        )
+        pre_details = pretip.get("details", {})
+        post_details = result["check8"].get("details", {})
+        for strat_name in post_details.get("per_strategy", {}):
+            if strat_name in pre_details.get("per_strategy", {}):
+                pre_passed = pre_details["per_strategy"][strat_name]["passed"]
+                post_passed = post_details["per_strategy"][strat_name]["passed"]
+                assert post_passed == pre_passed, (
+                    f"check8 strategy '{strat_name}' passed={post_passed} post-change "
+                    f"but was passed={pre_passed} in pretip baseline"
+                )
+    else:
+        # Pretip baseline absent (T-01 pre-step was skipped); fall back to pass-only assertion
+        import warnings
+        warnings.warn(
+            "check8-pretip.json absent — falling back to pass-only assertion. "
+            "Re-run T-01 pre-step to capture the byte-identity baseline.",
+            stacklevel=2,
         )

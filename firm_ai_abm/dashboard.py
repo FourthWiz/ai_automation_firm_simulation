@@ -355,32 +355,31 @@ def fig_wage_histogram(workforce_wage: np.ndarray) -> matplotlib.figure.Figure:
     return fig
 
 
-def fig_wage_vs_cumulative_output(
+def fig_wage_vs_mean_output(
     wages_final: np.ndarray,
-    cum_output_per_worker: np.ndarray,
+    mean_output_per_worker: np.ndarray,
     a_trained_final: np.ndarray,
 ) -> matplotlib.figure.Figure:
-    """Scatter of worker wage vs cumulative output, colored by training status.
+    """Scatter of worker wage vs mean per-period output, colored by training status.
 
     Input:
         wages_final: 1-D array of final-period wages, shape (K,).
-        cum_output_per_worker: 1-D array of NaN-summed cumulative output per worker,
+        mean_output_per_worker: 1-D array of NaN-averaged per-period output per worker,
             shape (K,). Workers where all output columns are NaN are excluded.
         a_trained_final: 1-D bool array of training status, shape (K,).
     Output:
-        Figure with scatter: X=wage, Y=cumulative output. Two colors:
+        Figure with scatter: X=wage, Y=mean output. Two colors:
           trained (#55A868 green), untrained (#4C72B0 blue). Legend shows counts.
         Workers where all output is NaN are excluded (fired before producing; misleading as 0).
     No disk I/O — returns Figure only.
     """
     wages = np.asarray(wages_final)
-    cum_out = np.asarray(cum_output_per_worker)
+    mean_out = np.asarray(mean_output_per_worker)
     trained = np.asarray(a_trained_final, dtype=bool)
 
-    # Exclude workers where cumulative output is NaN (zero data — T-mode-only or pre-hire)
-    valid = ~np.isnan(cum_out)
+    valid = ~np.isnan(mean_out)
     wages = wages[valid]
-    cum_out = cum_out[valid]
+    mean_out = mean_out[valid]
     trained = trained[valid]
 
     fig, ax = plt.subplots(figsize=(5, 3))
@@ -389,18 +388,18 @@ def fig_wage_vs_cumulative_output(
     n_untrained = int((~trained).sum())
 
     if n_untrained > 0:
-        ax.scatter(wages[~trained], cum_out[~trained], color="#4C72B0", alpha=0.7,
+        ax.scatter(wages[~trained], mean_out[~trained], color="#4C72B0", alpha=0.7,
                    s=20, label=f"untrained (n={n_untrained})")
     if n_trained > 0:
-        ax.scatter(wages[trained], cum_out[trained], color="#55A868", alpha=0.7,
+        ax.scatter(wages[trained], mean_out[trained], color="#55A868", alpha=0.7,
                    s=20, label=f"trained (n={n_trained})")
 
     if n_trained > 0 or n_untrained > 0:
         ax.legend(frameon=False, fontsize=8)
 
     ax.set_xlabel("wage")
-    ax.set_ylabel("cumulative output (NaN-summed over periods)")
-    ax.set_title("Wage vs. Cumulative Output")
+    ax.set_ylabel("mean output per period (NaN-averaged)")
+    ax.set_title("Wage vs. Mean Output")
     ax.grid(alpha=0.3)
     fig.tight_layout()
     return fig

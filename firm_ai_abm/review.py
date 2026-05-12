@@ -43,6 +43,23 @@ decision-twelve (Stage 6, see firing-logic-and-wage-viz plan): surplus = p · me
   firing_threshold_ui * tasks_per_worker) remains correct pre- and post-fix: the
   UI threshold is in per-task surplus units, and the kernel compares the per-worker
   surplus to threshold * tpw — dimensional consistency preserved on both sides.
+
+decision-thirteen (adaptive-firing-surplus): effective_surplus = p * mean_output - wage
+  - mean_aug_cost - F/K_review. The four-term full-cost surplus:
+    (1) revenue: params.p * mean_output[k] — price-scaled mean output over the review window
+    (2) wage:    workforce.wage[k]        — per-worker wage charge
+    (3) aug:     mean_aug_cost[k]         — mean per-worker augmentation tool cost over the
+                                            same review window (zero for H-mode, c_auto excluded
+                                            as firm-level overhead handled by F_share)
+    (4) overhead: F / K_review            — each worker carries a share of the fixed overhead F;
+                                            K_review = workforce.K captured BEFORE any firing mask
+                                            (stale-K cascade damping, D-01 below).
+  Modeling claim: the firm makes its firing decision using allocated full-cost surplus. F is a
+  firm-level lump sum in P&L; F_share enters only this decision rule (not the cost ledger).
+  This is the "full-cost accounting heuristic" and is what makes the coordination-failure
+  mechanism (CLAUDE.md pre-committed finding #1) work: each worker is judged against an
+  overhead allocation that grows as headcount shrinks, even though the firm's actual overhead
+  is unchanged.
 """
 from __future__ import annotations
 
@@ -61,33 +78,42 @@ if TYPE_CHECKING:
 def firing_review(
     workforce: Workforce,
     t: int,
-    output_per_worker: np.ndarray,  # shape (T_max, K_max), NaN-filled for inactive
+    output_per_worker: np.ndarray,      # shape (T_max, K_max), NaN-filled for inactive
+    aug_cost_per_worker: np.ndarray,    # shape (T_max, K_max), NaN-filled for inactive
     params: "FirmParams",
 ) -> tuple[np.ndarray, float]:
-    """Compute which workers to fire based on mean surplus over the trailing window.
+    """Compute which workers to fire based on mean full-cost surplus over the trailing window.
 
     Returns (fire_indices, c_train_lost_metric).
 
     c_train_lost is a diagnostic metric (D-08, D-11): it records the value of
     trained capital destroyed by the firings. It is NOT charged into pi.
 
+    Surplus formula (decision-thirteen, four terms):
+        effective_surplus[k] = params.p * mean_output[k]
+                                - workforce.wage[k]
+                                - mean_aug_cost[k]
+                                - F / K_review
+    where K_review = workforce.K captured BEFORE the fire mask (stale-K, D-01).
+
     Args:
         workforce: Current Workforce instance (read-only; not mutated).
         t: Current period index (0-based).
         output_per_worker: shape (T_max, K_max), float64. Entry [s, k] is the
-            summed output of worker k at period s, or NaN if the worker was
-            inactive (T-mode only) or not yet hired at period s.
-        params: FirmParams with T_review and firing_threshold fields.
+            summed output of worker k at period s, or NaN if inactive.
+        aug_cost_per_worker: shape (T_max, K_max), float64. Entry [s, k] is the
+            per-worker augmentation cost at period s (0.0 for H-mode, 0.0 during
+            training delay, NaN for inactive). Ignored when T_review=inf.
+        params: FirmParams with T_review, firing_threshold, F fields.
 
     Returns:
         (fire_indices, c_train_lost_metric) where:
           - fire_indices: np.ndarray of int, indices of workers to fire (may be empty).
-            surplus is price-scaled revenue per worker minus wage:
-            surplus[k] = params.p * mean_output[k] - workforce.wage[k]
           - c_train_lost_metric: float, value of trained capital lost (metric only).
         Returns (empty array, 0.0) when T_review=inf, t=0, or t is not a review period.
     """
-    # D-11: math.isinf short-circuit — FIRST, before any state read
+    # D-11: math.isinf short-circuit — FIRST, before any state read (load-bearing:
+    # int(math.inf) raises OverflowError; this guard must remain the first check)
     if math.isinf(params.T_review):
         return np.array([], dtype=int), 0.0
 
@@ -116,9 +142,39 @@ def firing_review(
     # firing candidates (D-01 "insufficient evidence" — e.g., T-mode-only workers,
     # or workers hired between the prior review and this one with zero observations).
 
+    # D-01 (cascade damping): K_review captures workforce.K ONCE at the start of this
+    # review evaluation, BEFORE any fire_mask is computed. F_share = F / K_review uses
+    # this stale K for the entire review tick. Even if N workers are fired in this tick,
+    # F_share does not re-balloon mid-tick — preventing per-tick recursive cascade.
+    #
+    # Cross-period cascades remain possible by design: at the NEXT review tick,
+    # K_review will be smaller (post-firing), F_share will be larger, and another
+    # round of firings can occur. This is the coordination-failure mechanism from
+    # CLAUDE.md pre-committed finding #1 and is intentional for Phase 1.5 research.
+    #
+    # Modeling claim (full-cost accounting): the firm makes its firing decision using
+    # allocated full-cost surplus — revenue minus marginal labor cost minus per-worker
+    # share of fixed overhead. The P&L records F as a firm-level lump sum; F_share
+    # enters only this decision rule and never the cost ledger. This mirrors standard
+    # managerial cost accounting and is what makes the coordination-failure mechanism
+    # work: each worker is judged against an overhead allocation that grows as headcount
+    # shrinks, even though the firm's actual overhead is unchanged.
+    K_review = workforce.K
+    F_share = (params.F / K_review) if K_review > 0 else 0.0
+
+    # mean_aug_cost: same col_has_data mask as output (D-06: workers fill aug_cost and
+    # output in the same Step 6 loop — NaN positions are identical by construction)
+    window_aug = aug_cost_per_worker[lo:t, : workforce.K]
+    mean_aug_cost = np.full(workforce.K, np.nan, dtype=np.float64)
+    if col_has_data.any():
+        mean_aug_cost[col_has_data] = np.nanmean(window_aug[:, col_has_data], axis=0)
+
     surplus = np.full(workforce.K, np.nan, dtype=np.float64)
     surplus[col_has_data] = (
-        params.p * mean_output[col_has_data] - workforce.wage[col_has_data]
+        params.p * mean_output[col_has_data]
+        - workforce.wage[col_has_data]
+        - mean_aug_cost[col_has_data]
+        - F_share
     )
 
     fire_mask = (~np.isnan(surplus)) & (surplus < params.firing_threshold)
@@ -135,30 +191,34 @@ def apply_firings(
     fire_indices: np.ndarray,
     t: int,
     output_per_worker: np.ndarray,
-) -> tuple[Workforce, np.ndarray]:
+    aug_cost_per_worker: np.ndarray,
+) -> tuple[Workforce, np.ndarray, np.ndarray]:
     """Remove fired workers; K SHRINKS by len(fire_indices). No auto-replacement.
 
-    Returns (new_workforce, new_output_per_worker). When fire_indices is empty,
-    returns SAME objects (identity, not copies) — callers can rely on this for
-    no-op fast-path detection.
+    Returns (new_workforce, new_output_per_worker, new_aug_cost_per_worker). When
+    fire_indices is empty, returns SAME objects (identity, not copies) — callers
+    can rely on this for no-op fast-path detection.
 
     Stage 5 D-03: apply_firings_and_replace is replaced by this drop-only function.
     run_simulation calls only apply_firings; hire-back is opt-in via replace_to_target.
 
-    After firing, output_per_worker[:, new_wf.K : K_max] is all-NaN (inactive slots).
+    After firing, output_per_worker[:, new_wf.K : K_max] and
+    aug_cost_per_worker[:, new_wf.K : K_max] are all-NaN (inactive slots).
 
     Args:
         firm: Firm instance (reads firm.workforce).
         fire_indices: np.ndarray of int, worker indices to fire.
         t: Current period (unused here; present for API symmetry with replace_to_target).
         output_per_worker: shape (T_max, K_max), float64. Not mutated; new array returned.
+        aug_cost_per_worker: shape (T_max, K_max), float64. Not mutated; new array returned.
 
     Returns:
-        (new_workforce, new_output_per_worker); new_workforce.K == wf.K - len(fire_indices).
+        (new_workforce, new_output_per_worker, new_aug_cost_per_worker);
+        new_workforce.K == wf.K - len(fire_indices).
     """
     # Stage 5 D-03: no-op returns SAME objects (identity — not copies)
     if fire_indices.size == 0:
-        return firm.workforce, output_per_worker
+        return firm.workforce, output_per_worker, aug_cost_per_worker
 
     wf = firm.workforce
     keep_mask = np.ones(wf.K, dtype=bool)
@@ -190,13 +250,20 @@ def apply_firings(
     )
 
     # Drop fired columns; survivor active columns reordered; trailing slots → NaN
+    # Apply identical reindex to both output and aug_cost arrays (D-06 alignment)
     active_cols = output_per_worker[:, : wf.K]
     surv_cols = active_cols[:, keep_mask]
     reordered = surv_cols[:, order]
     new_opw = np.full_like(output_per_worker, np.nan)
     new_opw[:, : new_wf.K] = reordered
 
-    return new_wf, new_opw
+    aug_active_cols = aug_cost_per_worker[:, : wf.K]
+    aug_surv_cols = aug_active_cols[:, keep_mask]
+    aug_reordered = aug_surv_cols[:, order]
+    new_acpw = np.full_like(aug_cost_per_worker, np.nan)
+    new_acpw[:, : new_wf.K] = aug_reordered
+
+    return new_wf, new_opw, new_acpw
 
 
 def replace_to_target(
@@ -204,27 +271,31 @@ def replace_to_target(
     K_target: int,
     t: int,
     output_per_worker: np.ndarray,
-) -> tuple[Workforce, np.ndarray]:
+    aug_cost_per_worker: np.ndarray,
+) -> tuple[Workforce, np.ndarray, np.ndarray]:
     """Opt-in hire-back: append K_target - wf.K replacements. No-op if wf.K >= K_target.
 
     Call AFTER apply_firings if hire-back is desired. run_simulation does NOT call this.
     Phase 2 implements strategy-driven hiring via this function.
 
-    Returns (new_workforce, new_output_per_worker). New replacement workers get
-    output_per_worker columns initialized to NaN (no history yet).
+    Returns (new_workforce, new_output_per_worker, new_aug_cost_per_worker). New
+    replacement workers get NaN-initialized columns in both arrays (no history yet).
+    When wf.K >= K_target, returns SAME objects (identity — no-op).
 
     Args:
         firm: Firm instance (reads firm.workforce, firm.params, firm.rng).
         K_target: Target workforce headcount after replacement.
         t: Current period (passed to sample_workforce as hire_t for new workers).
         output_per_worker: shape (T_max, K_max), float64. Not mutated; new array returned.
+        aug_cost_per_worker: shape (T_max, K_max), float64. Not mutated; new array returned.
 
     Returns:
-        (new_workforce, new_output_per_worker); new_workforce.K == K_target.
+        (new_workforce, new_output_per_worker, new_aug_cost_per_worker);
+        new_workforce.K == K_target.
     """
     wf = firm.workforce
     if wf.K >= K_target:
-        return wf, output_per_worker
+        return wf, output_per_worker, aug_cost_per_worker
 
     n_repl = K_target - wf.K
     repl = sample_workforce(n_repl, firm.params, firm.rng, current_t=t)
@@ -254,13 +325,19 @@ def replace_to_target(
         a_training_in_progress=new_aip,
     )
 
+    # Append NaN columns for replacement workers; reindex both arrays identically (D-06)
+    nan_cols = np.full((output_per_worker.shape[0], n_repl), np.nan, dtype=np.float64)
+
     active_cols = output_per_worker[:, : wf.K]
-    new_repl_cols = np.full(
-        (output_per_worker.shape[0], n_repl), np.nan, dtype=np.float64
-    )
-    combined_active = np.concatenate([active_cols, new_repl_cols], axis=1)
+    combined_active = np.concatenate([active_cols, nan_cols], axis=1)
     reordered = combined_active[:, order]
     new_opw = np.full_like(output_per_worker, np.nan)
     new_opw[:, : K_target] = reordered
 
-    return new_wf, new_opw
+    aug_active_cols = aug_cost_per_worker[:, : wf.K]
+    aug_combined_active = np.concatenate([aug_active_cols, nan_cols], axis=1)
+    aug_reordered = aug_combined_active[:, order]
+    new_acpw = np.full_like(aug_cost_per_worker, np.nan)
+    new_acpw[:, : K_target] = aug_reordered
+
+    return new_wf, new_opw, new_acpw
