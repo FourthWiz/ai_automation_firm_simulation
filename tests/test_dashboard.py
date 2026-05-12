@@ -316,36 +316,34 @@ class TestDashboardHelpers:
         assert fig is not None
         matplotlib.pyplot.close(fig)
 
-    def test_fig_wage_vs_cumulative_output(self):
-        """T-09 VIZ-2: fig_wage_vs_cumulative_output renders correct point count."""
-        from firm_ai_abm.dashboard import fig_wage_vs_cumulative_output
+    def test_fig_wage_vs_mean_output(self):
+        """T-09 VIZ-2: fig_wage_vs_mean_output renders correct point count."""
+        from firm_ai_abm.dashboard import fig_wage_vs_mean_output
         wages = np.array([0.9, 1.0, 1.1])
-        cum_out = np.array([10.0, 12.0, np.nan])  # worker 2 has NaN → excluded
+        mean_out = np.array([1.0, 1.2, np.nan])  # worker 2 has NaN → excluded
         a_trained = np.array([False, True, False])
         with warnings.catch_warnings(record=True):
             warnings.simplefilter("always")
-            fig = fig_wage_vs_cumulative_output(wages, cum_out, a_trained)
+            fig = fig_wage_vs_mean_output(wages, mean_out, a_trained)
         ax = fig.axes[0]
-        # Only 2 valid workers (worker 2 excluded due to NaN)
         scatter_offsets = []
         for collection in ax.collections:
             scatter_offsets.extend(collection.get_offsets().data.tolist())
         assert len(scatter_offsets) == 2, (
             f"Expected 2 scatter points (1 NaN worker excluded), got {len(scatter_offsets)}"
         )
-        # Two legend entries (trained + untrained)
         legend = ax.get_legend()
         assert legend is not None, "Expected legend"
         assert len(legend.get_texts()) == 2, "Expected 2 legend entries (trained + untrained)"
         matplotlib.pyplot.close(fig)
 
-    def test_fig_wage_vs_cumulative_output_all_nan(self):
+    def test_fig_wage_vs_mean_output_all_nan(self):
         """T-09 VIZ-2: handles empty active workers without raising."""
-        from firm_ai_abm.dashboard import fig_wage_vs_cumulative_output
+        from firm_ai_abm.dashboard import fig_wage_vs_mean_output
         wages = np.array([1.0, 1.0])
-        cum_out = np.array([np.nan, np.nan])  # all NaN → empty plot
+        mean_out = np.array([np.nan, np.nan])  # all NaN → empty plot
         a_trained = np.array([False, False])
-        fig = fig_wage_vs_cumulative_output(wages, cum_out, a_trained)
+        fig = fig_wage_vs_mean_output(wages, mean_out, a_trained)
         assert fig is not None
         matplotlib.pyplot.close(fig)
 
@@ -449,19 +447,18 @@ class TestAppSmoke:
                 f"Available labels: {sorted(all_labels)}"
             )
 
-    def test_main_panel_has_11_plots(self):
-        """Main panel renders 11 pyplot figures (as UnknownElement in AppTest 1.57).
+    def test_main_panel_has_12_plots(self):
+        """Main panel renders 12 pyplot figures (as UnknownElement in AppTest 1.57).
 
-        3 new plots added in Stage 6: wage histogram, wage-vs-output scatter,
-        hiring events. row6_right is blank (no st.pyplot) → count = 8+3 = 11.
+        Stage 6 added 3 plots (wage hist, wage-vs-output scatter, hiring events).
+        Cumulative-profit panel fills row6_right → count = 8+3+1 = 12.
         """
         from streamlit.testing.v1 import AppTest
         at = AppTest.from_file("app.py", default_timeout=60).run()
         assert not at.exception
-        # st.pyplot renders as UnknownElement in Streamlit 1.57 AppTest
         unknown_count = sum(1 for el in at.main if type(el).__name__ == "UnknownElement")
-        assert unknown_count == 11, (
-            f"Expected 11 st.pyplot (UnknownElement) in main panel, got {unknown_count}"
+        assert unknown_count == 12, (
+            f"Expected 12 st.pyplot (UnknownElement) in main panel, got {unknown_count}"
         )
 
     def test_footer_caption_content(self):
