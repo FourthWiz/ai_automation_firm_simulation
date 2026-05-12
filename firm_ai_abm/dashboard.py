@@ -405,15 +405,22 @@ def fig_wage_vs_mean_output(
     return fig
 
 
-def fig_hiring_events(df: pd.DataFrame, enable_hiring: bool = False) -> matplotlib.figure.Figure:
+def fig_hiring_events(
+    df: pd.DataFrame,
+    enable_hiring: bool = False,
+    enable_replenish_hiring: bool = False,
+) -> matplotlib.figure.Figure:
     """Hiring events timeline at review periods.
 
     Mirrors fig_firing_events: scatter of t values where n_hired > 0.
+    n_hired is populated identically under either hiring path (enable_hiring OR
+    enable_replenish_hiring — D-11 from augment-replenish-hiring plan).
     Input:
         df: run_simulation DataFrame with columns 't' (int) and
-            'n_hired' (int, workers hired this period; 0 when enable_hiring=False).
+            'n_hired' (int, workers hired this period; 0 when both flags False).
         enable_hiring: the enable_hiring flag used for the run (default False).
-            Used to distinguish "hiring disabled" vs "no hires despite being enabled".
+        enable_replenish_hiring: the enable_replenish_hiring flag (default False).
+            Used to distinguish "both disabled" vs "active but no hires yet".
     Output:
         Figure with one Axes: scatter of t values where n_hired > 0.
         Baseline at y=0. Empty-state message when no hires occurred.
@@ -435,8 +442,8 @@ def fig_hiring_events(df: pd.DataFrame, enable_hiring: bool = False) -> matplotl
                    zorder=3, label="workers hired")
         ax.legend(frameon=False, fontsize=8)
     else:
-        if not enable_hiring:
-            msg = "hiring disabled\n(enable_hiring=False)"
+        if not enable_hiring and not enable_replenish_hiring:
+            msg = "hiring disabled (both flags False)"
         else:
             msg = "no hiring events\n(no firings to backfill)"
         ax.text(0.5, 0.5, msg,
