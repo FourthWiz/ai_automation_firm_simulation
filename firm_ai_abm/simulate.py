@@ -204,7 +204,8 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
         # Per-worker aug-cost bookkeeping (D-07: SEPARATE cost_vec call; Step 7 unchanged)
         # T-mode tasks have t2w == -1 → excluded by worker_mask automatically.
         # Training-period A tasks: cost_vec returns 0 → aug_cost recorded as 0.0 (Q-02 / MAJ-5).
-        cost_per_task_aug = cost_vec(firm.modes, params, a_in_training_per_task=a_itp)
+        alpha = firm.alpha
+        cost_per_task_aug = cost_vec(firm.modes, alpha, params, a_in_training_per_task=a_itp)
         aug_cost_this_period = np.full(firm.workforce.K, np.nan, dtype=np.float64)
         for k in active_workers:
             worker_mask = (t2w == k)
@@ -213,7 +214,7 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
 
         # Step 7: per-task variable costs (UNCHANGED — D-07: independent call preserves
         # byte-identity of task_costs, C, and pi under dormant T_review=inf default)
-        task_costs = float(cost_vec(firm.modes, params, a_in_training_per_task=a_itp).sum())
+        task_costs = float(cost_vec(firm.modes, alpha, params, a_in_training_per_task=a_itp).sum())
 
         # Step 8: wage bill from ASSIGNED workers only
         active = np.unique(t2w[t2w >= 0])

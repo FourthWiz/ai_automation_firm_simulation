@@ -88,7 +88,18 @@ def greedy_profit(firm: Firm, t: int) -> np.ndarray:
 
     score_H = p.q_h - wage_per_task                                     # shape (N,)
     score_A = p.q_h * (1.0 + p.g * firm.beta) - p.c_aug - wage_per_task  # shape (N,)
-    score_T = p.q_a * firm.alpha - p.c_auto                              # shape (N,); no wage
+    if p.belief_alpha is None:
+        # D-05 dormant sentinel — preserve today's behavior bit-for-bit
+        score_T = p.q_a * firm.alpha - p.c_auto                          # shape (N,); no wage
+    else:
+        # D-04: belief-only scoring on BOTH productivity and cost sides
+        wage_per_task_scalar = p.w / p.tasks_per_worker
+        c_auto_belief = (
+            wage_per_task_scalar
+            * (p.c_auto_alpha_intercept - p.c_auto_alpha_slope * p.belief_alpha)
+        )
+        c_auto_belief = max(c_auto_belief, 0.0)
+        score_T = np.full(p.N, p.q_a * p.belief_alpha - c_auto_belief, dtype=np.float64)
 
     scores = np.zeros((p.N, 3), dtype=np.float64)
     scores[:, 0] = score_H
@@ -146,6 +157,16 @@ def greedy_with_switching(firm: Firm, t: int) -> np.ndarray:
                          cost_T = c_fire/tasks_per_worker/n_amortize = 2/10/6 ≈ 0.0333
           Net: H = 0.9, A ≈ 1.0833, T ≈ 0.6467. Argmax = A (column 1). Decision: H->A.
 
+    Belief path example (D-04): with c_auto_alpha_slope=2.0, c_auto_alpha_intercept=2.0,
+    belief_alpha=0.5, w=1, tasks_per_worker=5:
+        wage_per_task_scalar = w/tasks_per_worker = 0.2
+        c_auto_belief = 0.2 * (2.0 - 2.0*0.5) = 0.2 * 1.0 = 0.20
+        score_T = 1.2*0.5 - 0.20 = 0.40  (constant across all tasks; no per-alpha variation)
+    The asymmetric path picks H/A more often (lower expected T-mode score under uncertainty),
+    illustrating the belief wedge. Under the engaged path (D-04), greedy may stay in T-mode
+    even when realized cost proves worse, because it re-evaluates at the same prior each period
+    (no belief updates in Phase-1; see Q-01 in the architecture notes).
+
     Tie-breaking: np.argmax first-index-wins (H < A < T). When prev_mode == m,
     switch_cost[i, m] == 0, so the diagonal is favored over a tied off-diagonal —
     this gives "stay put on tie" semantics (R-11).
@@ -179,7 +200,18 @@ def greedy_with_switching(firm: Firm, t: int) -> np.ndarray:
 
     score_H = p.q_h - wage_per_task                                     # shape (N,)
     score_A = p.q_h * (1.0 + p.g * firm.beta) - p.c_aug - wage_per_task  # shape (N,)
-    score_T = p.q_a * firm.alpha - p.c_auto                              # shape (N,); no wage
+    if p.belief_alpha is None:
+        # D-05 dormant sentinel — preserve today's behavior bit-for-bit
+        score_T = p.q_a * firm.alpha - p.c_auto                          # shape (N,); no wage
+    else:
+        # D-04: belief-only scoring on BOTH productivity and cost sides
+        wage_per_task_scalar = p.w / p.tasks_per_worker
+        c_auto_belief = (
+            wage_per_task_scalar
+            * (p.c_auto_alpha_intercept - p.c_auto_alpha_slope * p.belief_alpha)
+        )
+        c_auto_belief = max(c_auto_belief, 0.0)
+        score_T = np.full(p.N, p.q_a * p.belief_alpha - c_auto_belief, dtype=np.float64)
 
     gross_scores = np.zeros((p.N, 3), dtype=np.float64)
     gross_scores[:, 0] = score_H

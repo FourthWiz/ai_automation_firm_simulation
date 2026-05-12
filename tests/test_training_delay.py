@@ -131,9 +131,10 @@ def test_cost_vec_no_aug_during_training():
         sigma_theta=0.0, sigma_w=0.0, seed=0,
     )
     modes = np.full(10, int(Mode.A), dtype=int)
+    alpha = np.zeros(10, dtype=np.float64)  # A-mode tasks; alpha value irrelevant here
     a_in_training = np.ones(10, dtype=bool)  # all tasks in training
 
-    cost = cost_vec(modes, params, a_in_training_per_task=a_in_training)
+    cost = cost_vec(modes, alpha, params, a_in_training_per_task=a_in_training)
     assert np.allclose(cost, 0.0, atol=1e-15), (
         f"In-training A-tasks should have 0 c_aug, got max={cost.max()}"
     )
@@ -141,6 +142,6 @@ def test_cost_vec_no_aug_during_training():
     # Partial: half in training, half fully trained
     a_partial = np.zeros(10, dtype=bool)
     a_partial[:5] = True
-    cost_partial = cost_vec(modes, params, a_in_training_per_task=a_partial)
+    cost_partial = cost_vec(modes, alpha, params, a_in_training_per_task=a_partial)
     assert np.allclose(cost_partial[:5], 0.0, atol=1e-15), "First 5 tasks in training → 0"
     assert np.allclose(cost_partial[5:], params.c_aug, atol=1e-15), "Last 5 tasks trained → c_aug"
