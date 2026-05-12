@@ -13,7 +13,9 @@ include wages; this is load-bearing for check3, check4, and check5 correctness.
 Numeraire scope:
 - SCALED_PARAMS (9 fields): the monetary parameters that scale profit linearly.
   firing_threshold added in Phase 1.5 Stage 7 (adaptive-firing-surplus).
-- UNSCALED_PARAMS (22 fields): productivity scalars, counts, and the seed.
+- UNSCALED_PARAMS (25 fields): productivity scalars, counts, flags, and the seed.
+  Three fields added in Phase 1.5 Stage X (augment-replenish-hiring):
+  enable_replenish_hiring, max_hire_period, hire_delay_periods.
   These two tuples partition dataclasses.fields(FirmParams) exactly (no overlap,
   no missing field). An in-code assertion in check5_numeraire enforces this
   contract; any future FirmParams field addition will raise immediately on
@@ -99,10 +101,15 @@ UNSCALED_PARAMS: tuple[str, ...] = (
     "enable_hiring",
     # Alpha-dependent automation cost (unknown-alpha-cost-model): dimensionless ratios (D-01)
     # and belief sentinel (D-02). Monetary scaling comes through the w/tpw factor in cost_vec.
-    # Total: 9 SCALED + 22 UNSCALED = 31 FirmParams fields.
+    # Phase 1.5 Stage X (augment-replenish-hiring): three new non-monetary fields.
+    # enable_replenish_hiring: boolean flag; max_hire_period: count; hire_delay_periods: count.
+    # Total: 9 SCALED + 25 UNSCALED = 34 FirmParams fields.
     "c_auto_alpha_slope",
     "c_auto_alpha_intercept",
     "belief_alpha",
+    "enable_replenish_hiring",
+    "max_hire_period",
+    "hire_delay_periods",
 )
 
 
@@ -732,6 +739,77 @@ def check10_adaptive_firing_numeraire(firm_factory) -> tuple[bool, dict]:
 
 
 # ---------------------------------------------------------------------------
+# Check 11: numeraire invariance with replenish-hiring active (Stage X)
+# ---------------------------------------------------------------------------
+
+
+def check11_replenish_numeraire(firm_factory) -> tuple[bool, dict]:
+    """Check 11: numeraire invariance holds when enable_replenish_hiring=True.
+
+    Uses params that guarantee firings occur (p=0.22, tpw=5, firing_threshold=0.0,
+    sigma=0) so the replenish path is non-vacuously exercised.
+
+    Verifies:
+    - pi_scaled == 2 * pi_base (rtol=1e-10, atol=1e-9)
+    - n_review_fired identical between base and scaled run (fire mask unchanged)
+    - n_hired identical between base and scaled run (hire decisions monetary-invariant)
+    - At least one firing AND one rehire actually occurred (non-vacuous)
+
+    The replenish path only adds: period_hire_cost = c_hire * n_hire. c_hire is in
+    SCALED_PARAMS → doubles linearly. n_hire is determined by K counts (UNSCALED) →
+    identical across base/scaled runs. Invariance holds.
+    """
+    from dataclasses import replace as _replace
+
+    params_base = FirmParams(
+        seed=0, tasks_per_worker=5, p=0.22,
+        sigma_theta=0.0, sigma_w=0.0,
+        T=20, T_review=10.0,
+        firing_threshold=0.0,
+        enable_replenish_hiring=True,
+        max_hire_period=0,
+        hire_delay_periods=1,
+    )
+    scaled_kwargs = {f: getattr(params_base, f) * 2.0 for f in SCALED_PARAMS}
+    params_scaled = _replace(params_base, **scaled_kwargs)
+
+    firm_base = make_firm(params_base)
+    df_base = run_simulation(firm_base, all_H)
+    pi_base = df_base["pi"].values
+
+    firm_scaled = make_firm(params_scaled)
+    df_scaled = run_simulation(firm_scaled, all_H)
+    pi_scaled = df_scaled["pi"].values
+
+    numeraire_ok = bool(np.allclose(pi_scaled, 2.0 * pi_base, rtol=1e-10, atol=1e-9))
+    max_dev = float(np.max(np.abs(pi_scaled - 2.0 * pi_base)))
+
+    n_review_fired_base = df_base["n_review_fired"].values
+    n_review_fired_scaled = df_scaled["n_review_fired"].values
+    fire_mask_ok = bool(np.array_equal(n_review_fired_base, n_review_fired_scaled))
+
+    n_hired_base = df_base["n_hired"].values
+    n_hired_scaled = df_scaled["n_hired"].values
+    hire_mask_ok = bool(np.array_equal(n_hired_base, n_hired_scaled))
+
+    any_firings = bool(df_base["n_review_fired"].sum() > 0)
+    any_hires = bool(df_base["n_hired"].sum() > 0)
+
+    passed = numeraire_ok and fire_mask_ok and hire_mask_ok and any_firings and any_hires
+
+    return passed, {
+        "numeraire_ok": numeraire_ok,
+        "fire_mask_ok": fire_mask_ok,
+        "hire_mask_ok": hire_mask_ok,
+        "any_firings": any_firings,
+        "any_hires": any_hires,
+        "max_pi_dev": max_dev,
+        "n_review_fired_base": int(df_base["n_review_fired"].sum()),
+        "n_hired_base": int(df_base["n_hired"].sum()),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Tier A aggregator
 # ---------------------------------------------------------------------------
 
@@ -743,7 +821,8 @@ def run_tier_a(firm_factory=None) -> dict:
     check4 (monotonicity in w), check5 (numeraire invariance), check7 (Phase 1
     degenerate parity), check8 (Stage 3 T_review=inf neutrality), check9
     (numeraire with firing active, Stage 5), check10 (adaptive-firing surplus
-    numeraire, Stage 7 — four-term formula + firing_threshold in SCALED_PARAMS).
+    numeraire, Stage 7 — four-term formula + firing_threshold in SCALED_PARAMS),
+    check11 (replenish-hiring numeraire, Stage X — enable_replenish_hiring path).
     Checks 2 and 6 (greedy dominance and adjustment-cost integration) are Tier B.
 
     Args:
@@ -754,9 +833,9 @@ def run_tier_a(firm_factory=None) -> dict:
 
     Returns:
         dict with keys: "check1", "check3", "check4", "check5", "check7", "check8",
-        "check9", "check10", "all_passed". Each check value is {"passed": bool, "details": dict}.
-        Does NOT raise on failure — returns the dict so the driver can render a
-        full report showing which checks failed and why.
+        "check9", "check10", "check11", "all_passed". Each check value is
+        {"passed": bool, "details": dict}. Does NOT raise on failure — returns the
+        dict so the driver can render a full report showing which checks failed and why.
 
     Deterministic: same seed → same alpha/beta → identical outputs across
     consecutive calls (no global state mutation between calls).
@@ -775,12 +854,16 @@ def run_tier_a(firm_factory=None) -> dict:
         ("check8", check8_stage3_neutrality),
         ("check9", check9_numeraire_with_firing_active),
         ("check10", check10_adaptive_firing_numeraire),
+        ("check11", check11_replenish_numeraire),
     ]:
         passed, details = check_fn(firm_factory)
         results[check_name] = {"passed": passed, "details": details}
 
     results["all_passed"] = all(
-        results[k]["passed"] for k in ("check1", "check3", "check4", "check5", "check7", "check8", "check9", "check10")
+        results[k]["passed"] for k in (
+            "check1", "check3", "check4", "check5", "check7", "check8",
+            "check9", "check10", "check11"
+        )
     )
 
     return results
