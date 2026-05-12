@@ -61,6 +61,13 @@ class FirmParams:
     target_margin: float = 0.05    # target (revenue - cost) / revenue when scenario_mode == "margin"
     margin_horizon: int = 5        # look-ahead periods for margin-optimizer brute grid
 
+    # Phase 1.5 Stage X — opt-in replenishment hiring (augment-replenish-hiring)
+    # Dormant by default (enable_replenish_hiring=False). Mutually exclusive with
+    # enable_hiring — both True raises ValueError at make_firm (validated in firm.py).
+    enable_replenish_hiring: bool = False  # when True, fired workers are queued for rehire after hire_delay_periods
+    max_hire_period: int = 0               # per-period hire cap; 0 = drain entire backlog in one period (sentinel)
+    hire_delay_periods: int = 1            # periods to wait before hiring back fired workers (>=1)
+
     # Alpha-dependent automation cost (D-01, D-02, D-05)
     # When belief_alpha is None (default), all three fields are dormant: cost_vec uses the flat
     # params.c_auto branch bit-for-bit, and strategies score T-mode with realized alpha.

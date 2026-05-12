@@ -74,7 +74,7 @@ import pandas as pd
 from firm_ai_abm.adjustment import adj_cost as compute_adj_cost
 from firm_ai_abm.firm import Firm
 from firm_ai_abm.production import compute_K, productivity_vec, cost_vec
-from firm_ai_abm.review import apply_firings, firing_review, optimal_hire_target, replace_to_target
+from firm_ai_abm.review import apply_firings, firing_review, optimal_hire_target, replace_to_target, replenish_hire_step
 from firm_ai_abm.workers import task_to_worker_map
 
 
@@ -136,6 +136,27 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
             )
             n_hired_period = firm.workforce.K - K_before_hire
             period_hire_cost = float(params.c_hire) * n_hired_period
+
+        # -------------------------------------------------------------------
+        # Step 0.5b: opt-in replenishment hiring (Phase 1.5 Stage X)
+        # Mutually exclusive with Step 0.5 (T-02 enforces at make_firm).
+        # With enable_replenish_hiring=False (default), this branch is never
+        # entered — no allocations, no new columns, byte-identical to prior runs.
+        # n_hired[t] == 0 at t where firings occurred (delay >= 1); hires appear
+        # at t + hire_delay_periods. See D-03, D-06, D-07, D-08 in plan.
+        # -------------------------------------------------------------------
+        elif params.enable_replenish_hiring:
+            # Queue this period's firings for future hire-back
+            if n_review_fired_period > 0:
+                firm.pending_hires.append((t + params.hire_delay_periods, n_review_fired_period))
+            # Drain due backlog entries
+            (
+                firm.workforce,
+                output_per_worker,
+                aug_cost_per_worker,
+                n_hired_period,
+                period_hire_cost,
+            ) = replenish_hire_step(firm, t, output_per_worker, aug_cost_per_worker)
 
         # -------------------------------------------------------------------
         # Step 1: strategy proposes new modes
@@ -286,12 +307,22 @@ def run_simulation(firm: Firm, strategy: Callable, T: int | None = None) -> pd.D
 
       Step 0.5 (Stage 6, opt-in):
         If enable_hiring AND n_review_fired > 0:
-          - replace_to_target(firm, firm.K0, t, output_per_worker) — restores workforce.K
-            to K0 using fresh worker draws (new theta/wage from same distribution).
+          - optimal_hire_target(firm, t, ...) → K* (firm-determined, not K0).
+          - replace_to_target(firm, K*, t, output_per_worker) — hires up to K*.
           - period_hire_cost = c_hire * n_hired
         Else: period_hire_cost = 0.0; n_hired = 0
         NOTE: replacement workers are NOT the same individuals fired; wage mean can drift
         over many fire+rehire cycles.
+
+      Step 0.5b (Phase 1.5 Stage X — replenishment hiring, opt-in, mutually exclusive with 0.5):
+        If enable_replenish_hiring AND n_review_fired > 0:
+          - Appends (t + hire_delay_periods, n_review_fired) to firm.pending_hires.
+        If enable_replenish_hiring:
+          - replenish_hire_step(firm, t, ...) drains due backlog entries (FIFO, D-06).
+          - n_hired[t] may be 0 at the fire period (delay >= 1); hires appear later.
+          - period_hire_cost = c_hire * n_hired_this_period
+        With enable_replenish_hiring=False (default), this branch is skipped entirely —
+        no new allocations, no new columns, byte-identical to prior runs (D-11).
 
       Step 1: new_modes = strategy(firm, t)
       Step 2: prev_modes = firm.modes.copy()   (capture AFTER strategy, BEFORE install)

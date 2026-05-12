@@ -68,10 +68,13 @@ _STRATEGY_REGISTRY = {
     "target_margin": target_margin_strategy,
 }
 
-# 27 scalar FirmParams fields in order (excludes 'seed' which is appended separately)
+# 30 scalar FirmParams fields in order (excludes 'seed' which is appended separately)
 # Indices: 0=N, 20=T_review, 21=firing_threshold, 22=scenario_mode,
 #          23=target_margin, 24=margin_horizon, 25=enable_training_delay,
-#          26=enable_hiring, -1=seed (position 27)
+#          26=enable_hiring, 27=enable_replenish_hiring, 28=max_hire_period,
+#          29=hire_delay_periods, -1=seed (position 30)
+# NOTE: alpha-cost fields (c_auto_alpha_slope, c_auto_alpha_intercept, belief_alpha)
+# are intentionally absent — no sidebar exposure.
 _PARAM_FIELDS = (
     "N", "T", "tasks_per_worker",
     "q_h", "q_a", "g",
@@ -81,20 +84,30 @@ _PARAM_FIELDS = (
     "sigma_theta", "theta_min", "theta_max", "corr_w_theta", "sigma_w",
     "T_review", "firing_threshold",
     "scenario_mode", "target_margin", "margin_horizon", "enable_training_delay",
-    "enable_hiring",  # index 26; seed moves to position 27 (still key[-1])
+    "enable_hiring",                # index 26
+    "enable_replenish_hiring",      # index 27
+    "max_hire_period",              # index 28
+    "hire_delay_periods",           # index 29; seed moves to position 30 (still key[-1])
+)
+
+# Subset assertion: catch misspellings without requiring exhaustive coverage.
+# Alpha-cost fields are intentionally excluded from _PARAM_FIELDS (no sidebar).
+assert set(_PARAM_FIELDS + ("seed",)) <= {f.name for f in dataclasses.fields(FirmParams)}, (
+    "Unknown field in _PARAM_FIELDS — check for misspellings"
 )
 
 
 def params_to_key(params: FirmParams, seed: int) -> tuple:
-    """Build a 28-tuple cache key from a FirmParams instance and seed.
+    """Build a 31-tuple cache key from a FirmParams instance and seed.
 
     The tuple contains only Python scalars (int, float, bool, str). math.inf is
     included as a float — hash(math.inf) is stable in CPython.
-    seed is appended as the 28th element (position 27).
+    seed is appended as the 31st element (position 30).
 
     Indices: 0=N, 20=T_review, 21=firing_threshold, 22=scenario_mode,
              23=target_margin, 24=margin_horizon, 25=enable_training_delay,
-             26=enable_hiring, -1=seed (position 27)
+             26=enable_hiring, 27=enable_replenish_hiring, 28=max_hire_period,
+             29=hire_delay_periods, -1=seed (position 30)
     """
     values = tuple(getattr(params, f) for f in _PARAM_FIELDS)
     return values + (seed,)
@@ -121,10 +134,11 @@ def run_cached(params_key: tuple, strategy_name: str) -> tuple:
     """Run the simulation for the given params key and strategy.
 
     Args:
-        params_key: 28-tuple from params_to_key(). The last element is seed.
+        params_key: 31-tuple from params_to_key(). The last element is seed.
             Indices 20=T_review, 21=firing_threshold, 22=scenario_mode,
             23=target_margin, 24=margin_horizon, 25=enable_training_delay,
-            26=enable_hiring, -1=seed (position 27).
+            26=enable_hiring, 27=enable_replenish_hiring, 28=max_hire_period,
+            29=hire_delay_periods, -1=seed (position 30).
         strategy_name: key into _STRATEGY_REGISTRY.
 
     Returns:
@@ -297,8 +311,31 @@ def _build_sidebar() -> tuple:
         enable_hiring_val = st.checkbox(
             "enable_hiring",
             value=False,
-            help="When enabled, fired workers are immediately rehired toward initial headcount K0. c_hire is charged per hire.",
+            help="When enabled, fired workers are immediately rehired toward K*. c_hire is charged per hire.",
             key="enable_hiring",
+        )
+        # Replenishment hiring — mutually exclusive with enable_hiring.
+        # Server-side validation in make_firm is authoritative; UI warns but does not block.
+        enable_replenish_hiring_val = st.checkbox(
+            "enable_replenish_hiring",
+            value=False,
+            help="Augmentation-targeted backlog hiring. Mutually exclusive with enable_hiring.",
+            key="enable_replenish_hiring",
+        )
+        if enable_hiring_val and enable_replenish_hiring_val:
+            st.warning("enable_hiring and enable_replenish_hiring are mutually exclusive — disable one.", icon="⚠️")
+        hire_delay_periods_val = st.number_input(
+            "hire_delay_periods", min_value=1, max_value=20,
+            value=FirmParams().hire_delay_periods, step=1,
+            help="Periods to wait before hiring back fired workers (>=1). Active only when enable_replenish_hiring=True.",
+            key="hire_delay_periods",
+            disabled=not enable_replenish_hiring_val,
+        )
+        max_hire_period_val = st.number_input(
+            "max_hire_period", min_value=0, max_value=200,
+            value=FirmParams().max_hire_period, step=1,
+            help="Per-period hire cap from backlog. 0 = drain entire backlog in one period.",
+            key="max_hire_period",
         )
 
     # Margin scenario (T-09)
@@ -360,6 +397,9 @@ def _build_sidebar() -> tuple:
         margin_horizon=int(margin_horizon_val),
         enable_training_delay=bool(enable_training_delay_val),
         enable_hiring=bool(enable_hiring_val),
+        enable_replenish_hiring=bool(enable_replenish_hiring_val),
+        max_hire_period=int(max_hire_period_val),
+        hire_delay_periods=int(hire_delay_periods_val),
         seed=int(seed),
     )
     key = params_to_key(draft_params, int(seed))
@@ -470,8 +510,13 @@ def main() -> None:
 
     row6_left, row6_right = st.columns(2)
     with row6_left:
-        enable_hiring_active = bool(active_key[26])  # index 26 = enable_hiring
-        st.pyplot(fig_hiring_events(df, enable_hiring=enable_hiring_active))
+        enable_hiring_active = bool(active_key[26])          # index 26 = enable_hiring (unchanged)
+        enable_replenish_active = bool(active_key[27])       # index 27 = enable_replenish_hiring
+        st.pyplot(fig_hiring_events(
+            df,
+            enable_hiring=enable_hiring_active,
+            enable_replenish_hiring=enable_replenish_active,
+        ))
     with row6_right:
         st.pyplot(fig_pi_over_time(df))
 
@@ -488,18 +533,28 @@ def main() -> None:
     else:
         realized_corr = float("nan")
 
+    # Determine hiring path label for caption
+    if enable_hiring_active:
+        hiring_path = "K*-target"
+    elif enable_replenish_active:
+        hiring_path = "replenish"
+    else:
+        hiring_path = "none"
+
     # Stage 5 T-09: NaN guard when K dropped to 0
     if math.isnan(realized_corr) and final_k_active == 0:
         st.caption(
             "corr = N/A (workforce dropped to K=0; consider reducing firing_threshold)"
-            f"    total firings = {total_firings}    total hirings = {total_hirings}"
+            f"    total firings = {total_firings}"
+            f"    Hires: {total_hirings} (path: {hiring_path})"
             f"    final K_active = {final_k_active}"
         )
     else:
         st.caption(
             f"corr(theta, log(wage)) = {realized_corr:.4f}"
             f"    final cumulative profit = {final_pi:.4f}"
-            f"    total firings = {total_firings}    total hirings = {total_hirings}"
+            f"    total firings = {total_firings}"
+            f"    Hires: {total_hirings} (path: {hiring_path})"
             f"    final K_active = {final_k_active}"
         )
     # Show cache-hit observability via RUN_COUNTER.
