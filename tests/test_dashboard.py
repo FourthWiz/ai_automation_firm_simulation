@@ -462,7 +462,10 @@ class TestAppSmoke:
         )
 
     def test_footer_caption_content(self):
-        """Footer captions contain required strings (Stage 6: total firings, total hirings, final K_active)."""
+        """Footer captions contain required strings (Stage 6: total firings, hires, final K_active).
+
+        Updated for augment-replenish-hiring: 'total hirings' replaced by 'Hires: N (path: X)'.
+        """
         from streamlit.testing.v1 import AppTest
         at = AppTest.from_file("app.py", default_timeout=60).run()
         assert not at.exception
@@ -477,8 +480,8 @@ class TestAppSmoke:
         assert "total firings" in combined, (
             f"Footer missing 'total firings'. Captions: {caption_values}"
         )
-        assert "total hirings" in combined, (
-            f"Footer missing 'total hirings'. Captions: {caption_values}"
+        assert "Hires:" in combined, (
+            f"Footer missing 'Hires:' (hiring summary). Captions: {caption_values}"
         )
         assert "final K_active" in combined, (
             f"Footer missing 'final K_active'. Captions: {caption_values}"

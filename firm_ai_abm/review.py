@@ -344,6 +344,71 @@ def replace_to_target(
     return new_wf, new_opw, new_acpw
 
 
+def replenish_hire_step(
+    firm: "Firm",
+    t: int,
+    output_per_worker: np.ndarray,
+    aug_cost_per_worker: np.ndarray,
+) -> "tuple[Workforce, np.ndarray, np.ndarray, int, float]":
+    """Drain due entries from firm.pending_hires and hire back workers via replace_to_target.
+
+    Called from simulate.run_horizon Step 0.5b when enable_replenish_hiring=True.
+    REUSES replace_to_target — no parallel hiring code path.
+
+    Returns:
+        (new_workforce, new_output_per_worker, new_aug_cost_per_worker, n_hired, hire_cost)
+    When no hires occur (empty backlog, no due entries, or K >= K_max), returns the input
+    objects with SAME identity (mirrors apply_firings no-op semantics) and n_hired=0, hire_cost=0.0.
+
+    FIFO drain (D-06): oldest tuple consumed first. Global per-period cap (D-07): max_hire_period
+    is applied to the total due count, not per-firing. K_max floor (D-09): never exceeds physical
+    capacity N // tasks_per_worker.
+    """
+    wf = firm.workforce
+    K_max = firm.params.N // firm.params.tasks_per_worker
+
+    if not firm.pending_hires:
+        return wf, output_per_worker, aug_cost_per_worker, 0, 0.0
+    if wf.K >= K_max:
+        return wf, output_per_worker, aug_cost_per_worker, 0, 0.0
+
+    # Sum all due entries (period_eligible <= t)
+    total_due = sum(n for (period_eligible, n) in firm.pending_hires if period_eligible <= t)
+    if total_due == 0:
+        return wf, output_per_worker, aug_cost_per_worker, 0, 0.0
+
+    # Apply K_max capacity floor (D-09)
+    capacity_remaining = K_max - wf.K
+    total_due = min(total_due, capacity_remaining)
+
+    # Apply per-period cap: 0 means no cap (drain all)
+    if firm.params.max_hire_period == 0:
+        n_hire = total_due
+    else:
+        n_hire = min(total_due, firm.params.max_hire_period)
+
+    # FIFO drain (D-06): consume oldest tuples first
+    remaining_to_drain = n_hire
+    new_backlog = []
+    for (period_eligible, n) in firm.pending_hires:
+        if period_eligible > t or remaining_to_drain == 0:
+            new_backlog.append((period_eligible, n))
+            continue
+        if n <= remaining_to_drain:
+            remaining_to_drain -= n
+        else:
+            new_backlog.append((period_eligible, n - remaining_to_drain))
+            remaining_to_drain = 0
+    firm.pending_hires = new_backlog
+
+    # Delegate to existing replace_to_target (REUSES Stage 6 hiring helper)
+    new_wf, new_opw, new_acpw = replace_to_target(
+        firm, wf.K + n_hire, t, output_per_worker, aug_cost_per_worker
+    )
+    hire_cost = float(firm.params.c_hire) * n_hire
+    return new_wf, new_opw, new_acpw, n_hire, hire_cost
+
+
 def optimal_hire_target(
     firm: "Firm",
     t: int,
