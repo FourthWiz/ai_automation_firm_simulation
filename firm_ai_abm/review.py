@@ -64,6 +64,7 @@ decision-thirteen (adaptive-firing-surplus): effective_surplus = p * mean_output
 from __future__ import annotations
 
 import math
+import warnings
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -341,3 +342,76 @@ def replace_to_target(
     new_acpw[:, : K_target] = aug_reordered
 
     return new_wf, new_opw, new_acpw
+
+
+def optimal_hire_target(
+    firm: "Firm",
+    t: int,
+    output_per_worker: np.ndarray,
+    aug_cost_per_worker: np.ndarray,
+    params: "FirmParams",
+) -> int:
+    """Compute optimal hire target K* for the opt-in hire-back path.
+
+    Returns the smallest integer K such that the expected surplus of an average
+    new hire at headcount K meets firing_threshold, capped at the physical
+    capacity K_max = N // tasks_per_worker, and floored at the current K
+    (never fires via this path — only hires up).
+
+    Expected-surplus model for a fresh draw at headcount K:
+        E[surplus(K)] = p * E[output] - E[wage] - E[aug_cost] - F / K
+    where:
+        E[output]   = nanmean of survivors' output_per_worker over trailing window
+        E[wage]     = params.w (population mean; new hires are fresh draws)
+        E[aug_cost] = nanmean of survivors' aug_cost_per_worker over trailing window
+                      (0.0 when no valid entries)
+
+    Setting E[surplus(K*)] = firing_threshold and solving:
+        K* = F / (p * E[output] - E[wage] - E[aug_cost] - firing_threshold)
+
+    Fallback to wf.K (no hire) when:
+        - T_review is inf (hire path is dormant anyway; defensive guard)
+        - t == 0 (no trailing data yet)
+        - trailing window has no non-NaN output entries
+        - denominator <= 0 (new hires unprofitable at any K)
+
+    Args:
+        firm: Firm instance (reads firm.workforce).
+        t: Current period (0-based). Trailing window is [max(0, t - T_review), t).
+        output_per_worker: shape (T_max, K_max), NaN for inactive slots.
+        aug_cost_per_worker: shape (T_max, K_max), NaN for inactive slots.
+        params: FirmParams (reads T_review, p, w, F, firing_threshold,
+            N, tasks_per_worker).
+
+    Returns:
+        int K_target in [wf.K, K_max].
+    """
+    wf = firm.workforce
+    K_max = params.N // params.tasks_per_worker
+
+    # math.isinf guard MUST come first — int(math.inf) raises OverflowError (load-bearing)
+    if math.isinf(params.T_review):
+        return wf.K
+    if t == 0:
+        return wf.K
+
+    T_review_int = int(params.T_review)
+    lo = max(0, t - T_review_int)
+    window_out = output_per_worker[lo:t, : wf.K]
+    window_aug = aug_cost_per_worker[lo:t, : wf.K]
+
+    if window_out.size == 0 or np.all(np.isnan(window_out)):
+        return wf.K
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        e_output = float(np.nanmean(window_out))
+        e_aug = 0.0 if np.all(np.isnan(window_aug)) else float(np.nanmean(window_aug))
+
+    denom = params.p * e_output - float(params.w) - e_aug - float(params.firing_threshold)
+
+    if denom <= 0.0:
+        return wf.K
+
+    K_star = math.ceil(params.F / denom)
+    return max(wf.K, min(K_star, K_max))

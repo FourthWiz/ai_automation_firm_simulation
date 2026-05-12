@@ -35,8 +35,12 @@ Phase 1.5 Stage 5 additions:
 
 Phase 1.5 Stage 6 additions:
   - Step 0.5 (opt-in hire-back): when enable_hiring=True and firings occurred, calls
-    replace_to_target(firm, firm.K0, t, output_per_worker) to restore workforce.K to K0.
-    Replacement workers are fresh draws (new theta/wage); period_hire_cost = c_hire * n_hired.
+    optimal_hire_target(firm, t, output_per_worker, aug_cost_per_worker, params) to
+    compute a firm-determined target K*, then replace_to_target(firm, K*, ...).
+    K* is the smallest K for which the expected surplus of an average new hire meets
+    firing_threshold, capped at K_max = N // tasks_per_worker. Replacement workers
+    are fresh draws; period_hire_cost = c_hire * n_hired. Replaces the prior
+    K0-target behavior (K0 is now only the de-facto cap when K* > K_max == K0).
   - History gains n_hired column (int, 0 when enable_hiring=False).
   - firm.K0: initial headcount captured once in make_firm; never mutated by reset().
     compute_adj_cost. Demotes excess H/A tasks to T when n_HA > workforce.K * tpw.
@@ -70,7 +74,7 @@ import pandas as pd
 from firm_ai_abm.adjustment import adj_cost as compute_adj_cost
 from firm_ai_abm.firm import Firm
 from firm_ai_abm.production import compute_K, productivity_vec, cost_vec
-from firm_ai_abm.review import apply_firings, firing_review, replace_to_target
+from firm_ai_abm.review import apply_firings, firing_review, optimal_hire_target, replace_to_target
 from firm_ai_abm.workers import task_to_worker_map
 
 
@@ -115,18 +119,20 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
             )
 
         # -------------------------------------------------------------------
-        # Step 0.5: opt-in hire-back to K0 (same period, after apply_firings)
+        # Step 0.5: opt-in hire-back to firm-determined K* (after apply_firings)
         # -------------------------------------------------------------------
         n_hired_period = 0
         period_hire_cost = 0.0
         if params.enable_hiring and n_review_fired_period > 0:
-            # replace_to_target draws FRESH workers via sample_workforce (new theta and
-            # wage draws from the same distribution as the initial workforce). Hired
-            # workers are NOT the same individuals who were fired. Wage mean can drift
-            # over many fire+rehire cycles per workers.py drift semantics.
+            # K* = firm-determined optimal target based on expected surplus of an
+            # average new hire. Replaces the prior K0 target. Gated on
+            # enable_hiring=True; default-False path is unchanged.
+            K_target = optimal_hire_target(
+                firm, t, output_per_worker, aug_cost_per_worker, params
+            )
             K_before_hire = firm.workforce.K
             firm.workforce, output_per_worker, aug_cost_per_worker = replace_to_target(
-                firm, firm.K0, t, output_per_worker, aug_cost_per_worker
+                firm, K_target, t, output_per_worker, aug_cost_per_worker
             )
             n_hired_period = firm.workforce.K - K_before_hire
             period_hire_cost = float(params.c_hire) * n_hired_period
