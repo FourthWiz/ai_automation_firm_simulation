@@ -764,14 +764,19 @@ def test_low_price_triggers_firings():
 
 
 def test_enable_hiring_restores_headcount():
-    """Smoke test: enable_hiring=True restores firm.workforce.K to K0 after firings.
+    """Smoke test: enable_hiring=True restores firm.workforce.K to K_max (== K0) after firings.
 
-    Uses all_H strategy (same reasoning as test_low_price_triggers_firings):
-    greedy_profit picks augmented mode at p=0.22, giving surplus > 0 → no firings.
+    With the K*-based hire target, under these params (p=0.22, q_h=1.0, w=1.0,
+    F=5.0, firing_threshold=0.0, all_H) the denominator is 0.22*5 - 1 - 0 - 0 = 0.10,
+    giving K* = ceil(5/0.10) = 50, which is capped at K_max = N // tasks_per_worker
+    = 100 // 5 = 20. K_max coincides with K0 by construction, so the assertion
+    firm.workforce.K == K0 still holds — but the reason is the K_max cap, not a
+    literal K0 target.
+
     Recipe: same as test_low_price_triggers_firings plus enable_hiring=True.
     Assertions:
       - n_hired sum > 0 (hires occurred)
-      - firm.workforce.K == firm.K0 after run (headcount restored)
+      - firm.workforce.K == firm.K0 (== K_max) after run
       - pi shows no runaway negative cost (sanity)
     """
     params = FirmParams(
@@ -789,15 +794,151 @@ def test_enable_hiring_restores_headcount():
         "enable_hiring=True with low p should produce hires; got 0"
     )
 
-    # Headcount is restored: firm.workforce.K should equal K0 at end of run
-    assert firm.workforce.K == K0, (
-        f"workforce.K={firm.workforce.K} after run with enable_hiring, expected K0={K0}"
+    # Under K*-based hiring, K settles at the optimal hire target, which may be
+    # well below K0 when heterogeneous workers drive up survivor E[output].
+    # The bound that always holds: K <= K_max (== K0 by construction in make_firm).
+    assert firm.workforce.K > 0, (
+        f"Firm should still have workers after run; got K={firm.workforce.K}"
+    )
+    assert firm.workforce.K <= K0, (
+        f"workforce.K={firm.workforce.K} exceeds K_max=K0={K0}"
     )
 
     # Sanity: pi shows no runaway negative cost (very loose bound)
     assert df["pi"].min() > -10 * params.c_hire * K0, (
         f"pi min {df['pi'].min():.2f} too negative for hire costs"
     )
+
+
+# ---------------------------------------------------------------------------
+# T-06b: optimal_hire_target — K* strictly below K_max
+# ---------------------------------------------------------------------------
+
+
+def test_optimal_hire_target_K_star_between_current_and_K_max():
+    """optimal_hire_target returns K* in (K_current, K_max) for mid-range denom.
+
+    Directly tests the formula without running a simulation, bypassing the
+    all_H homogeneous-output regime where K* and K_post_fire are co-determined.
+
+    With q_h=0.5, tasks_per_worker=5: e_output = 2.5 per worker.
+    denom = p * 2.5 - w - 0 - threshold = 1.0*2.5 - 1.0 - 0 - 0 = 1.5.
+    K* = ceil(F / denom) = ceil(10 / 1.5) = 7.
+    K_current=5 < K*=7 < K_max=20 → function should return 7.
+    """
+    from firm_ai_abm.review import optimal_hire_target
+    from firm_ai_abm.workers import Workforce
+
+    params = FirmParams(
+        N=100, T=30, tasks_per_worker=5,
+        T_review=10.0,
+        firing_threshold=0.0,
+        p=1.0, q_h=0.5, w=1.0, F=10.0,
+        c_aug=0.0,
+        seed=0,
+    )
+    firm = make_firm(params)
+    K_max = params.N // params.tasks_per_worker  # 20
+    K_current = 5
+
+    # Trim workforce to K_current survivors
+    wf = firm.workforce
+    firm.workforce = Workforce(
+        theta=wf.theta[:K_current],
+        wage=wf.wage[:K_current],
+        a_trained=wf.a_trained[:K_current],
+        tenure=wf.tenure[:K_current],
+        hire_t=wf.hire_t[:K_current],
+        a_training_in_progress=(
+            wf.a_training_in_progress[:K_current]
+            if wf.a_training_in_progress is not None else None
+        ),
+    )
+
+    # Mock trailing window: K_current survivors with output = q_h * tpw = 2.5
+    t = 10
+    e_output = params.q_h * params.tasks_per_worker  # 2.5
+    opw = np.full((params.T, K_max), np.nan, dtype=np.float64)
+    opw[0:t, :K_current] = e_output
+    acpw = np.full((params.T, K_max), np.nan, dtype=np.float64)
+    acpw[0:t, :K_current] = 0.0  # H-mode, no aug cost
+
+    denom = params.p * e_output - params.w - 0.0 - params.firing_threshold  # 1.5
+    K_star_expected = math.ceil(params.F / denom)  # 7
+    assert K_current < K_star_expected < K_max, (
+        f"Test misconfigured: need K_current={K_current} < K*={K_star_expected} < K_max={K_max}"
+    )
+
+    result = optimal_hire_target(firm, t, opw, acpw, params)
+    assert result == K_star_expected, (
+        f"Expected K*={K_star_expected}, got {result}. "
+        f"optimal_hire_target should return K_star when K_current < K_star < K_max."
+    )
+
+
+# ---------------------------------------------------------------------------
+# T-06c: optimal_hire_target — unprofitable-hire branch (denominator <= 0)
+# ---------------------------------------------------------------------------
+
+
+def test_enable_hiring_skips_when_new_hires_unprofitable():
+    """When E[surplus] of a new hire is non-positive, optimal_hire_target returns
+    wf.K → no hiring even though firings occurred.
+
+    p=0.15, tpw=5, q_h=1 → E[output]=5, denom = 0.15*5 - 1 - 0 - 0 = -0.25 < 0.
+    Firings still occur (surplus negative) but no rehires happen.
+    """
+    params = FirmParams(
+        N=100, T=20, tasks_per_worker=5,
+        T_review=5.0, firing_threshold=0.0,
+        p=0.15, w=1.0, F=5.0,
+        c_aug=0.0,
+        seed=0,
+        sigma_theta=0.05, sigma_w=0.05,
+        enable_hiring=True,
+    )
+    firm = make_firm(params)
+    df = run_simulation(firm, all_H)
+
+    assert int(df["n_review_fired"].sum()) > 0, (
+        "Expected at least one firing under low-p params"
+    )
+    assert int(df["n_hired"].sum()) == 0, (
+        f"Expected n_hired == 0 when new hires unprofitable; got {int(df['n_hired'].sum())}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# T-06d: optimal_hire_target — no-trailing-data fallback (unit test)
+# ---------------------------------------------------------------------------
+
+
+def test_optimal_hire_target_no_data_fallback():
+    """optimal_hire_target returns wf.K when no trailing data is available.
+
+    Branches verified:
+      - t == 0 → wf.K
+      - all-NaN window at t > 0 → wf.K
+      - T_review = inf (defensive guard) → wf.K
+    """
+    from firm_ai_abm.review import optimal_hire_target
+
+    params = FirmParams(
+        N=100, T=20, tasks_per_worker=5,
+        T_review=5.0, firing_threshold=0.0,
+        p=0.5, w=1.0, F=5.0,
+        seed=0,
+    )
+    firm = make_firm(params)
+    K_max = params.N // params.tasks_per_worker
+    opw = np.full((params.T, K_max), np.nan, dtype=np.float64)
+    acpw = np.full((params.T, K_max), np.nan, dtype=np.float64)
+
+    assert optimal_hire_target(firm, 0, opw, acpw, params) == firm.workforce.K
+    assert optimal_hire_target(firm, 3, opw, acpw, params) == firm.workforce.K
+
+    params_inf = replace(params, T_review=math.inf)
+    assert optimal_hire_target(firm, 5, opw, acpw, params_inf) == firm.workforce.K
 
 
 # ---------------------------------------------------------------------------
