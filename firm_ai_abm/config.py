@@ -60,3 +60,13 @@ class FirmParams:
     scenario_mode: str = "price"   # "price" or "margin"
     target_margin: float = 0.05    # target (revenue - cost) / revenue when scenario_mode == "margin"
     margin_horizon: int = 5        # look-ahead periods for margin-optimizer brute grid
+
+    # Alpha-dependent automation cost (D-01, D-02, D-05)
+    # When belief_alpha is None (default), all three fields are dormant: cost_vec uses the flat
+    # params.c_auto branch bit-for-bit, and strategies score T-mode with realized alpha.
+    # When belief_alpha is a float (e.g. 0.5), the alpha-dependent formula is engaged:
+    #   c_auto_i(alpha_i) = (w/tasks_per_worker) * (c_auto_alpha_intercept - c_auto_alpha_slope * alpha_i)
+    # clamped at 0. belief_alpha lives on FirmParams (not Firm) to avoid strategy-signature churn.
+    c_auto_alpha_slope: float = 0.0       # slope of linear alpha-dependence in per-task auto cost (D-01)
+    c_auto_alpha_intercept: float = 0.0   # intercept of linear alpha-dependence (D-01)
+    belief_alpha: float | None = None     # prior mean E[alpha] for T-mode scoring; None = dormant (D-02, D-05)

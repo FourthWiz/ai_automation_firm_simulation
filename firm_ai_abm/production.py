@@ -84,6 +84,7 @@ def productivity_vec(
 
 def cost_vec(
     modes: np.ndarray,
+    alpha: np.ndarray,
     params: FirmParams,
     a_in_training_per_task: np.ndarray | None = None,
 ) -> np.ndarray:
@@ -91,7 +92,7 @@ def cost_vec(
 
     H  -> 0.0          (wages charged per worker in simulate.py, not per task)
     A  -> c_aug        (per-task augmentation tool cost)
-    T  -> c_auto       (per-task automation infrastructure cost)
+    T  -> c_auto       (per-task automation infrastructure cost; see note below)
 
     a_in_training_per_task=None (default) gives byte-identical output.
     When a_in_training_per_task[i]=True for an A-task: c_aug is NOT charged
@@ -100,6 +101,16 @@ def cost_vec(
 
     NOTE: There is NO w/N term here. Per architecture D-01, wages are charged
     as w * K in simulate.run_simulation. Adding w/N here would double-count.
+
+    Alpha-dependent T-cost (D-01, D-05):
+      - When params.belief_alpha is None (default/dormant): T cost = params.c_auto (flat).
+        This path is byte-identical to the pre-change formula for all inputs.
+      - When params.belief_alpha is not None (engaged):
+          c_auto_i = (w/tpw) * (c_auto_alpha_intercept - c_auto_alpha_slope * alpha_i)
+          clamped at 0 via np.maximum(..., 0.0). No + params.c_auto additive term (D-01).
+      T-mode entries in the aug-cost callsite (simulate.py Step 6) are filtered by
+      worker_mask (t2w == -1 for T tasks), so aug_cost_per_worker remains unaffected
+      by the engaged path (MAJ-1 note from plan T-03).
 
     Kernel invariants (assert, not raise — these are call-site preconditions):
       - modes must have integer dtype
@@ -113,7 +124,18 @@ def cost_vec(
     )
     c = np.where(modes == Mode.H, 0.0, 0.0)
     c = np.where(modes == Mode.A, params.c_aug, c)
-    c = np.where(modes == Mode.T, params.c_auto, c)
+    if params.belief_alpha is None:
+        # D-05 dormant sentinel: flat c_auto, byte-identical to pre-change formula
+        c = np.where(modes == Mode.T, params.c_auto, c)
+    else:
+        # D-01 engaged path: linear alpha-dependent cost, no additive c_auto term
+        wage_per_task = params.w / params.tasks_per_worker
+        c_auto_per_task = (
+            wage_per_task
+            * (params.c_auto_alpha_intercept - params.c_auto_alpha_slope * alpha)
+        )
+        c_auto_per_task = np.maximum(c_auto_per_task, 0.0)
+        c = np.where(modes == Mode.T, c_auto_per_task, c)
     if a_in_training_per_task is not None:
         # In-training A-tasks: tool not meaningfully used → zero c_aug this period
         c = np.where((modes == Mode.A) & a_in_training_per_task, 0.0, c)

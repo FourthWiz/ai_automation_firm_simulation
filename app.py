@@ -192,7 +192,7 @@ def _build_sidebar() -> tuple:
     # Counts — use exact field names as labels (required for test_sidebar_all_param_fields_present)
     with st.sidebar.expander("Counts", expanded=True):
         N = st.number_input(
-            "N", min_value=1, max_value=500, value=FirmParams().N, step=10,
+            "N", min_value=1, max_value=1000, value=500, step=10,
             help="Number of tasks per firm", key="N",
         )
         T = st.number_input(

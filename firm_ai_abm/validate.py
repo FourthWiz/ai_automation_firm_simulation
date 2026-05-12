@@ -13,7 +13,7 @@ include wages; this is load-bearing for check3, check4, and check5 correctness.
 Numeraire scope:
 - SCALED_PARAMS (9 fields): the monetary parameters that scale profit linearly.
   firing_threshold added in Phase 1.5 Stage 7 (adaptive-firing-surplus).
-- UNSCALED_PARAMS (15 fields): productivity scalars, counts, and the seed.
+- UNSCALED_PARAMS (22 fields): productivity scalars, counts, and the seed.
   These two tuples partition dataclasses.fields(FirmParams) exactly (no overlap,
   no missing field). An in-code assertion in check5_numeraire enforces this
   contract; any future FirmParams field addition will raise immediately on
@@ -97,6 +97,12 @@ UNSCALED_PARAMS: tuple[str, ...] = (
     "target_margin",
     # Phase 1.5 Stage 6: enable_hiring is a boolean flag (not monetary)
     "enable_hiring",
+    # Alpha-dependent automation cost (unknown-alpha-cost-model): dimensionless ratios (D-01)
+    # and belief sentinel (D-02). Monetary scaling comes through the w/tpw factor in cost_vec.
+    # Total: 9 SCALED + 22 UNSCALED = 31 FirmParams fields.
+    "c_auto_alpha_slope",
+    "c_auto_alpha_intercept",
+    "belief_alpha",
 )
 
 
@@ -808,6 +814,11 @@ def check2_greedy_dominance(firm_factory) -> tuple[bool, dict]:
 
     Note: firm_factory parameter is reserved for Phase-3 sweep reuse; check builds
     its own params for axis isolation (mirrors check1/check3/check4/check5 contract).
+
+    Holds in the dormant regime (belief_alpha=None). Under the engaged path
+    (belief_alpha is not None), greedy-under-belief is no longer optimal in hindsight
+    by design — the belief wedge IS the feature. Use check11_greedy_dominance_under_belief
+    (future work, Q-04) for the engaged-path invariant.
 
     Returns:
         (passed, details) where details = {
