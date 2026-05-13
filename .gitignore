@@ -11,3 +11,10 @@ build/
 .ipynb_checkpoints/
 results/figures/*.png
 results/figures/*.svg
+
+# Dev/debug screenshots and playwright artifacts
+*.png
+*.jpg
+*.jpeg
+.playwright-mcp/
+dev/
