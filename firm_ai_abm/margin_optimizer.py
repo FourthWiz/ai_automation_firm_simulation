@@ -29,7 +29,7 @@ def _params_hash(firm: Firm, t: int) -> tuple:
     return (t, id(firm.params))
 
 
-def target_margin_strategy(firm: Firm, t: int) -> np.ndarray:
+def horizon_brute_strategy(firm: Firm, t: int) -> np.ndarray:
     """Return modes array from the candidate with the best objective for the current scenario.
 
     Branches on firm.params.scenario_mode:
@@ -92,3 +92,8 @@ def target_margin_strategy(firm: Firm, t: int) -> np.ndarray:
     result = best_modes
     cache[key] = result.copy()
     return result.copy()
+
+
+# D-07: backward-compat alias — preserves tests/test_margin_optimizer.py
+# and any notebook code that imports target_margin_strategy by name.
+target_margin_strategy = horizon_brute_strategy

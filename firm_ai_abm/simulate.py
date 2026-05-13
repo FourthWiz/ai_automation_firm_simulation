@@ -76,6 +76,13 @@ from firm_ai_abm.firm import Firm
 from firm_ai_abm.production import compute_K, productivity_vec, cost_vec
 from firm_ai_abm.review import apply_firings, firing_review, optimal_hire_target, replace_to_target, replenish_hire_step
 from firm_ai_abm.workers import task_to_worker_map
+# F-03 wiring: DP optimizer helpers for two-source firing merge (T-10).
+# On non-DP runs firm._dp_optimizer_n_fire == 0 (the default) and the
+# merge block is a no-op — these imports are dormant for all other strategies.
+from firm_ai_abm.dp_optimizer import (
+    _is_review_period,
+    _sort_fireable_workers_by_cost_effectiveness,
+)
 
 
 def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
@@ -111,6 +118,26 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
         fire_indices, c_train_lost_period = firing_review(
             firm.workforce, t, output_per_worker, aug_cost_per_worker, params
         )
+
+        # F-03 T-10: Two-source firing UNION merge.
+        # The DP optimizer may have set firm._dp_optimizer_n_fire in the prior
+        # period's strategy call (Step 1). On non-DP strategies this attribute
+        # is absent (getattr returns 0) — the block is a no-op.
+        # UNION semantics (D-12): merged = threshold_set ∪ dp_set.
+        # Consumer-side gate: _is_review_period(t, ...) — this IS the review period.
+        dp_n_fire = int(getattr(firm, "_dp_optimizer_n_fire", 0))
+        if dp_n_fire > 0 and _is_review_period(t, params.T_review):
+            full_order = _sort_fireable_workers_by_cost_effectiveness(
+                firm, output_per_worker, firm.workforce.wage, t
+            )
+            dp_fires = full_order[:dp_n_fire].astype(int)
+            # UNION: preserve deterministic order (ascending worker index via np.unique)
+            merged = np.unique(np.concatenate([fire_indices, dp_fires]))
+            fire_indices = merged.astype(int)
+        # Reset the optimizer hint: a non-DP strategy in the next period must not
+        # inherit a stale fire count. Happens AFTER the merge, BEFORE Step 1 below.
+        firm._dp_optimizer_n_fire = 0  # type: ignore[attr-defined]
+
         n_review_fired_period = int(len(fire_indices))
         period_review_fire_cost = float(params.c_fire) * n_review_fired_period
         if n_review_fired_period > 0:
@@ -171,6 +198,11 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
         # -------------------------------------------------------------------
         # Step 1: strategy proposes new modes
         # -------------------------------------------------------------------
+        # MAJ-14 in-loop seam: expose output_per_worker to the DP optimizer's
+        # _forward_simulate via a firm attribute. Set every period (cheap no-op
+        # attribute write for non-DP strategies). The attribute is "live during
+        # a strategy call only" — the next period overwrites it.
+        firm._output_per_worker_so_far = output_per_worker  # type: ignore[attr-defined]
         new_modes = strategy(firm, t)
 
         # Step 2: capture prev_modes AFTER strategy, BEFORE install
