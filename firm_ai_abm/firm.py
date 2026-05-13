@@ -22,6 +22,12 @@ class Firm:
     # MUST use field(default_factory=list) — mutable default would be shared across instances.
     # This is run-state (cleared by reset), unlike alpha/beta/workforce (firm-identity state).
     pending_hires: list = field(default_factory=list)
+    # closed_worker_wages: terminal cum_wage value for each worker who has been fired.
+    # Appended in review.apply_firings / replace_to_target before the worker's SoA slot
+    # is removed. Cleared on reset() (run-state, mirrors pending_hires). Never shrinks
+    # mid-run — only appended. Combined with live workforce.cum_wage for the per-period
+    # mean_accum_wage metric.
+    closed_worker_wages: list = field(default_factory=list)
 
     @property
     def K(self) -> int:
@@ -40,8 +46,12 @@ class Firm:
         self.modes = np.zeros(N, dtype=int)  # all H = Mode.H = 0
         self.history = []
         self.pending_hires = []
+        self.closed_worker_wages = []
         self._margin_cache: dict = {}  # type: ignore[attr-defined]
-        # workforce is NOT re-sampled here — it persists for the firm's lifetime
+        # workforce is NOT re-sampled here — it persists for the firm's lifetime.
+        # cum_wage IS zeroed because it is run-state (like pending_hires), not firm-identity state.
+        if self.workforce is not None:
+            self.workforce.cum_wage = np.zeros(self.workforce.K, dtype=np.float64)
         # K0 is intentionally NOT reset here — it is the initial headcount set once in make_firm
 
 
