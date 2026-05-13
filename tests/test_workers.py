@@ -350,7 +350,7 @@ def test_t14_greedy_uniform_theta_modes():
     Includes a T-mode period: verifies greedy picks T-mode tasks at t=0 (when profitable)
     and modes stay byte-identical to Phase 1 (CRIT-1 fix effective).
     """
-    params = FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0, tasks_per_worker=10, p=1.0)
+    params = FirmParams(seed=0, N=100, sigma_theta=0.0, sigma_w=0.0, tasks_per_worker=10, p=1.0)
     # Run Phase 1.5 with degenerate params
     firm15 = make_firm(params)
     df15_gp = run_simulation(firm15, greedy_profit)

@@ -142,7 +142,7 @@ def check1_constant_baseline(firm_factory) -> tuple[bool, dict]:
         for axis isolation).
       - Run run_simulation(firm, all_H).
       - Closed-form expected: p * q_h * N - w * K - F where K = N // tasks_per_worker.
-        With defaults (p=1, q_h=1, N=100, w=1, tasks_per_worker=10, F=5):
+        With axis-isolated params (p=1, q_h=1, N=100, w=1, tasks_per_worker=10, F=5):
         expected_pi = 1.0 * 1.0 * 100 - 1.0 * 10 - 5.0 = 85.0 per period.
       - Also assert K is constant (worker-integerization regression).
 

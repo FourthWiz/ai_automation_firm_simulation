@@ -14,7 +14,7 @@ Architecture notes:
   is the SAME on cache hits (same cached 5-tuple). The app writes this timestamp
   to session_state["RUN_COUNTER_VAL_THIS_RUN"] so AppTest can detect cache hits
   by checking if the value changes between calls.
-- N default: FirmParams().N = 100 (sidebar previously hardcoded 500 — corrected).
+- N default: FirmParams().N = 500 (sidebar reads via FirmParams().N).
 
 Run:
     .venv/bin/streamlit run app.py
@@ -267,7 +267,7 @@ def _build_controls() -> tuple:
             min_value=1, max_value=1000,
             value=int(FirmParams().N),
             step=10,
-            help="Number of tasks per firm (FirmParams default: 100)",
+            help=f"Number of tasks per firm (FirmParams default: {FirmParams().N})",
             key="N",
         )
 
