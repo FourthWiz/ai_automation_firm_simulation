@@ -29,25 +29,46 @@ class Firm:
     # mean_accum_wage metric.
     closed_worker_wages: list = field(default_factory=list)
 
+    # Bayesian per-task posterior means for the DP optimizer (F-03).
+    # Initialized to _DP_PRIOR_MEAN (0.9) at construction via make_firm; revealed
+    # exactly when a task runs in the corresponding mode (T reveals alpha_i; A reveals
+    # beta_i). Within-run state ONLY: cleared by reset() (run-state, like
+    # history/pending_hires).
+    # alpha_hat[i] is the posterior mean for task i's automatability.
+    # beta_hat[i] is the posterior mean for task i's augmentability.
+    # Independent of belief_alpha (which is a SCALAR firm-wide prior used by greedy
+    # strategies); alpha_hat/beta_hat are PER-TASK and only read by the DP optimizer.
+    # Default None: will be initialized by make_firm (lazy import of _DP_PRIOR_MEAN
+    # to avoid module-load-time circular imports firm.py → dp_optimizer.py → firm.py).
+    alpha_hat: np.ndarray | None = None
+    beta_hat: np.ndarray | None = None
+
     @property
     def K(self) -> int:
         return self.workforce.K if self.workforce is not None else 0
 
     def reset(self) -> None:
-        """Reset modes/history/pending_hires. NEVER touches alpha, beta, or workforce (R-07, CRIT-2).
+        """Reset modes/history/pending_hires/posteriors. NEVER touches alpha, beta, or workforce.
 
         pending_hires IS cleared here (it is run-state, like firm.history). If it were not
         cleared, check2_greedy_dominance (which reuses one firm across multiple run_simulation
         calls via reset()) would leak a phantom backlog from one strategy trial into the next.
         This is the exact asymmetry with workforce: workforce persists (firm-identity state),
         pending_hires resets (run-state). See D-08 in augment-replenish-hiring plan.
+
+        alpha_hat/beta_hat are also run-state: cleared here to prior mean so each fresh
+        run_simulation call starts with uninformed beliefs (D-04 in dp-optimizer plan).
         """
+        from firm_ai_abm.dp_optimizer import _DP_PRIOR_MEAN  # function-scope to avoid cycle
         N = self.params.N
         self.modes = np.zeros(N, dtype=int)  # all H = Mode.H = 0
         self.history = []
         self.pending_hires = []
         self.closed_worker_wages = []
         self._margin_cache: dict = {}  # type: ignore[attr-defined]
+        # Posterior arrays — run-state; reset to prior mean on every fresh run.
+        self.alpha_hat = np.full(N, _DP_PRIOR_MEAN, dtype=np.float64)
+        self.beta_hat = np.full(N, _DP_PRIOR_MEAN, dtype=np.float64)
         # workforce is NOT re-sampled here — it persists for the firm's lifetime.
         # cum_wage IS zeroed because it is run-state (like pending_hires), not firm-identity state.
         if self.workforce is not None:

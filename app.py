@@ -40,7 +40,8 @@ from firm_ai_abm.strategy import (
     greedy_profit,
     greedy_with_switching,
 )
-from firm_ai_abm.margin_optimizer import target_margin_strategy
+from firm_ai_abm.margin_optimizer import horizon_brute_strategy, target_margin_strategy  # noqa: F401  # target_margin_strategy kept for backward compat
+from firm_ai_abm.dp_optimizer import dp_rolling_horizon_strategy
 from firm_ai_abm.dashboard import (
     fig_pi_per_period_over_time,
     fig_pi_over_time,
@@ -86,7 +87,8 @@ _STRATEGY_REGISTRY = {
     "all_A": all_A,
     "all_T": all_T,
     "greedy_with_switching": greedy_with_switching,
-    "horizon_optimizer": target_margin_strategy,
+    "horizon_brute": horizon_brute_strategy,          # legacy 5-candidate brute search
+    "horizon_optimizer": dp_rolling_horizon_strategy,  # new DP rolling-horizon optimizer (F-03)
 }
 
 # 34 scalar FirmParams fields in order (excludes 'seed' which is appended separately)
