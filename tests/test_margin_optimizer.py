@@ -157,8 +157,10 @@ def test_TN1_highest_margin_candidate_wins():
     (low floor), all candidates that generate revenue clear the floor. The new argmax rule
     selects the highest-margin candidate (all_T or greedy), NOT the lowest-margin candidate
     that merely meets the floor.
+
+    Uses scenario_mode="margin" to test the margin-path behavior explicitly.
     """
-    firm = _make_firm(target_margin=0.0, horizon=3, q_a=5.0, g=0.0)
+    firm = _make_firm(target_margin=0.0, horizon=3, q_a=5.0, g=0.0, scenario_mode="margin")
 
     # Gather realized margins for each candidate independently
     realized_by_cand = {}
@@ -207,8 +209,10 @@ def test_TN1_edge_all_zero_revenue():
 def test_TN2_unachievable_target_returns_highest_margin_exact():
     """T-N2: With target_margin=0.9 (unachievable), returns modes of the candidate
     with the highest realized margin — strengthened to assert exact modes, not just non-None.
+
+    Uses scenario_mode="margin" to test the margin-path behavior explicitly.
     """
-    firm = _make_firm(target_margin=0.9, horizon=3, q_a=3.0, g=0.5)
+    firm = _make_firm(target_margin=0.9, horizon=3, q_a=3.0, g=0.5, scenario_mode="margin")
 
     realized_by_cand = {}
     for cand in _CANDIDATES:
@@ -255,3 +259,65 @@ def test_old_rule_audit_no_closest_from_above_encoding():
     # This test is a documentation stub: it always passes and serves as a commit-message
     # reference for future readers.
     assert True, "old-rule audit: no closest-from-above assertions found in test suite"
+
+
+def test_price_mode_maximizes_cumulative_profit():
+    """T-11: In price mode, target_margin_strategy picks the candidate with highest sum(pi).
+
+    Uses high q_a and low c_auto so all_T yields clearly higher cumulative profit
+    than human or augmented modes. Asserts the returned modes are all mode=2 (T).
+    """
+    params = FirmParams(
+        seed=0,
+        N=100,
+        tasks_per_worker=10,
+        sigma_theta=0.0,
+        sigma_w=0.0,
+        target_margin=0.0,
+        margin_horizon=5,
+        p=1.0,
+        q_a=10.0,   # very high automation productivity
+        c_auto=0.01,  # very low automation cost
+        g=0.0,       # no augmentation benefit
+        scenario_mode="price",
+    )
+    firm = make_firm(params)
+    firm._margin_cache = {}
+    result = target_margin_strategy(firm, 0)
+
+    assert result is not None
+    assert result.shape == (params.N,), f"modes shape mismatch: {result.shape}"
+    assert result.dtype.kind == "i", f"modes must be integer dtype, got {result.dtype}"
+    # With q_a=10 and c_auto=0.01, all_T should dominate — all modes should be 2 (T)
+    assert np.all(result == 2), (
+        f"Expected all modes=2 (all_T) in price mode with high q_a, got unique values: {np.unique(result)}"
+    )
+
+
+def test_margin_mode_unchanged():
+    """T-11: In margin mode, target_margin_strategy returns a valid modes array (smoke test).
+
+    Verifies that the margin-mode behavior is preserved after the price/margin branching
+    change — the function returns a well-formed modes array of the right shape and dtype.
+    """
+    params = FirmParams(
+        seed=0,
+        N=100,
+        tasks_per_worker=10,
+        sigma_theta=0.0,
+        sigma_w=0.0,
+        target_margin=0.0,
+        margin_horizon=5,
+        p=1.0,
+        scenario_mode="margin",
+    )
+    firm = make_firm(params)
+    firm._margin_cache = {}
+    result = target_margin_strategy(firm, 0)
+
+    assert result is not None, "margin mode must return a valid modes array"
+    assert result.shape == (params.N,), f"modes shape mismatch: {result.shape}"
+    assert result.dtype.kind == "i", f"modes must be integer dtype, got {result.dtype}"
+    assert set(np.unique(result)) <= {0, 1, 2}, (
+        f"modes must contain only valid mode values (0, 1, 2), got: {np.unique(result)}"
+    )

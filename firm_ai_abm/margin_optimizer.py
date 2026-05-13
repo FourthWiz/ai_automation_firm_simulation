@@ -30,7 +30,13 @@ def _params_hash(firm: Firm, t: int) -> tuple:
 
 
 def target_margin_strategy(firm: Firm, t: int) -> np.ndarray:
-    """Return modes array from the candidate that best meets target_margin.
+    """Return modes array from the candidate with the best objective for the current scenario.
+
+    Branches on firm.params.scenario_mode:
+    - "price" mode: maximizes cumulative profit sum(pi) over margin_horizon periods.
+      Picks the candidate with the highest sum of per-period profit (p*Y - C).
+    - "margin" mode (default): maximizes realized margin (revenue - cost) / revenue
+      over margin_horizon periods. Picks the candidate with the highest realized margin.
 
     Projection uses copy.deepcopy(firm) + run_horizon — the deepcopy carries
     live modes, a_trained, a_training_in_progress, theta, wage, and tenure
@@ -53,12 +59,12 @@ def target_margin_strategy(firm: Firm, t: int) -> np.ndarray:
     if key in cache:
         return cache[key].copy()
 
-    target = firm.params.target_margin
     horizon = firm.params.margin_horizon
+    scenario_mode = firm.params.scenario_mode
 
     # Seed with first candidate so result is always non-None, even when all
-    # candidates project revenue == 0 (realized = -inf for every candidate).
-    best_realized = -math.inf
+    # candidates project revenue == 0 (objective = -inf for every candidate).
+    best_objective = -math.inf
     best_modes: np.ndarray = _CANDIDATES[0](firm, t)
 
     for cand in _CANDIDATES:
@@ -67,17 +73,20 @@ def target_margin_strategy(firm: Firm, t: int) -> np.ndarray:
         assert len(proj_df) == horizon, (
             f"run_horizon returned {len(proj_df)} rows, expected {horizon}"
         )
-        revenue = firm.params.p * float(proj_df["Y"].sum())
-        cost = float(proj_df["C"].sum())
-        realized = (revenue - cost) / revenue if revenue > 0 else -math.inf
 
-        # Pick the candidate with the highest realized margin (argmax).
+        if scenario_mode == "price":
+            # Maximize cumulative profit over the horizon
+            objective = float(proj_df["pi"].sum())
+        else:
+            # Maximize realized margin: (revenue - cost) / revenue
+            revenue = firm.params.p * float(proj_df["Y"].sum())
+            cost = float(proj_df["C"].sum())
+            objective = (revenue - cost) / revenue if revenue > 0 else -math.inf
+
+        # Pick the candidate with the highest objective (argmax).
         # >= gives last-wins-on-ties semantics (stable across _CANDIDATES order).
-        # The target_margin constraint acts as a floor: the firm maximizes profit
-        # subject to margin >= target, but since argmax always picks the highest
-        # margin, the qualified and unqualified cases collapse to one branch.
-        if realized >= best_realized:
-            best_realized = realized
+        if objective >= best_objective:
+            best_objective = objective
             best_modes = cand(firm, t)
 
     result = best_modes

@@ -98,10 +98,6 @@ def test_tabs_present():
 def test_widget_keys_preserved():
     """P1-11.14: All widget keys from the frozen contract are present on the page.
 
-    Assumes default scenario='price'; `strategy_adv` radio is only present in
-    at.radio under the price scenario — when scenario='margin', it is replaced
-    by a static st.markdown and does not appear in at.radio.
-
     NOTE: relies on AppTest including disabled widgets in at.number_input/at.slider/
     at.radio collections (verified via the existing disabled p/target_margin pattern).
     If a future Streamlit upgrade excludes disabled widgets from these collections,
@@ -287,59 +283,3 @@ def test_plausible_noop_when_placeholder_unset():
     )
 
 
-def test_strategy_radio_persists_across_expander_toggle():
-    """D-02: strategy_adv value persists across re-renders (Streamlit key-based session_state).
-
-    AppTest .run() simulates a full Streamlit rerun, equivalent to expander open/close
-    from a widget-state persistence perspective.
-    """
-    from streamlit.testing.v1 import AppTest
-
-    at = AppTest.from_file("app.py", default_timeout=60).run()
-    # Set strategy_adv to a non-default value
-    at.radio(key="strategy_adv").set_value("all_T").run()
-    # Interact with another widget to simulate re-render
-    at.number_input(key="N").set_value(150).run()
-    # Verify strategy_adv value persisted
-    radios = {r.key: r for r in at.radio}
-    assert radios["strategy_adv"].value == "all_T", (
-        f"strategy_adv should persist across re-render, got {radios['strategy_adv'].value}"
-    )
-
-
-def test_strategy_merge_function():
-    """D-02: Verify four merge cases via LAST_STRATEGY_DEBUG session_state key.
-
-    Case 1: advanced=default, non-advanced=greedy_profit → greedy_profit
-    Case 2: advanced=default, non-advanced=greedy_with_switching → greedy_with_switching
-    Case 3: advanced=all_T (non-default) → all_T wins regardless of non-advanced
-    Case 4: scenario=margin → target_margin always
-    """
-    from streamlit.testing.v1 import AppTest
-
-    at = AppTest.from_file("app.py", default_timeout=30).run()
-
-    # Case 1: advanced=default (greedy_profit), non-advanced=greedy_profit → greedy_profit
-    at.radio(key="strategy_adv").set_value("greedy_profit").run()
-    at.radio(key="strategy").set_value("greedy_profit").run()
-    assert at.session_state["LAST_STRATEGY_DEBUG"] == "greedy_profit", (
-        f"Case 1 failed: expected greedy_profit, got {at.session_state['LAST_STRATEGY_DEBUG']}"
-    )
-
-    # Case 2: advanced=default, non-advanced=greedy_with_switching → greedy_with_switching
-    at.radio(key="strategy").set_value("greedy_with_switching").run()
-    assert at.session_state["LAST_STRATEGY_DEBUG"] == "greedy_with_switching", (
-        f"Case 2 failed: expected greedy_with_switching, got {at.session_state['LAST_STRATEGY_DEBUG']}"
-    )
-
-    # Case 3: advanced=all_T (non-default), non-advanced=anything → all_T
-    at.radio(key="strategy_adv").set_value("all_T").run()
-    assert at.session_state["LAST_STRATEGY_DEBUG"] == "all_T", (
-        f"Case 3 failed: expected all_T, got {at.session_state['LAST_STRATEGY_DEBUG']}"
-    )
-
-    # Case 4: scenario=margin → target_margin always
-    at.radio(key="scenario").set_value("margin").run()
-    assert at.session_state["LAST_STRATEGY_DEBUG"] == "target_margin", (
-        f"Case 4 failed: expected target_margin, got {at.session_state['LAST_STRATEGY_DEBUG']}"
-    )

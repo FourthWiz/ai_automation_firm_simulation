@@ -387,6 +387,45 @@ class TestAppSmoke:
         radio_labels = [r.label for r in at.radio]
         assert "Strategy" in radio_labels, f"Strategy radio not found, got: {radio_labels}"
 
+    def test_strategy_single_widget_all_options(self):
+        """T-07: Single strategy widget with key='strategy' exposes all 6 registry options.
+
+        Enforces the single-widget contract: no 'strategy_adv' widget anywhere,
+        and the 'strategy' widget has all 6 strategies as options.
+        """
+        import sys, os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from streamlit.testing.v1 import AppTest
+        from app import _STRATEGY_REGISTRY
+
+        at = AppTest.from_file("app.py", default_timeout=60).run()
+        assert not at.exception
+
+        # Find the strategy widget (radio or selectbox)
+        strategy_radio = next((r for r in at.radio if r.key == "strategy"), None)
+        strategy_select = next((s for s in at.selectbox if s.key == "strategy"), None) if strategy_radio is None else None
+
+        assert strategy_radio is not None or strategy_select is not None, (
+            "No widget with key='strategy' found (checked radio and selectbox)"
+        )
+
+        if strategy_radio is not None:
+            assert set(strategy_radio.options) == set(_STRATEGY_REGISTRY.keys()), (
+                f"Strategy radio options {set(strategy_radio.options)} != "
+                f"registry keys {set(_STRATEGY_REGISTRY.keys())}"
+            )
+        else:
+            assert set(strategy_select.options) == set(_STRATEGY_REGISTRY.keys()), (
+                f"Strategy selectbox options {set(strategy_select.options)} != "
+                f"registry keys {set(_STRATEGY_REGISTRY.keys())}"
+            )
+
+        # No widget with key='strategy_adv' should exist anywhere
+        all_radio_keys = {r.key for r in at.radio}
+        assert "strategy_adv" not in all_radio_keys, (
+            "Found unexpected widget with key='strategy_adv' — advanced strategy radio must be deleted"
+        )
+
     def test_sidebar_seed_input_exists(self):
         """P1-11.4: Seed number_input exists somewhere on the page."""
         from streamlit.testing.v1 import AppTest
@@ -673,17 +712,27 @@ class TestDashboardMarginScenario:
         assert "target_margin" in slider_keys, "target_margin slider not visible in margin mode"
         assert "margin_horizon" in input_keys, "margin_horizon number_input not visible in margin mode"
 
-    def test_margin_scenario_strategy_auto_target(self):
-        """T-11: Selecting margin scenario forces strategy=target_margin in cached call."""
+    def test_margin_scenario_does_not_auto_lock_strategy(self):
+        """T-06: Setting scenario=margin must NOT force strategy to horizon_optimizer.
+
+        Strategy is now an independent widget; scenario is a pure pricing selector.
+        The strategy radio must retain its default value (greedy_profit) when scenario
+        is switched to margin, and the run caption must reflect that choice.
+        """
         at = self._get_at()
         scenario_radio = next((r for r in at.radio if r.key == "scenario"), None)
         if scenario_radio is None:
             pytest.skip("scenario radio not found")
         scenario_radio.set_value("margin")
-        at.run()
-        run_btn = self._find_run_btn(at)
-        at = run_btn.click().run()
-        captions = [c.value for c in at.caption]
-        assert any("target_margin" in str(c) for c in captions), (
-            f"Expected caption mentioning 'target_margin' in margin mode, got: {captions}"
+        at = at.run()
+        # Strategy radio should still be at its default (greedy_profit)
+        strategy_radio = next((r for r in at.radio if r.key == "strategy"), None)
+        assert strategy_radio is not None, "strategy radio not found"
+        assert strategy_radio.value == "greedy_profit", (
+            f"Expected strategy default 'greedy_profit' after setting scenario=margin, "
+            f"got: {strategy_radio.value}"
+        )
+        # LAST_STRATEGY_DEBUG must reflect greedy_profit (not horizon_optimizer)
+        assert at.session_state["LAST_STRATEGY_DEBUG"] == "greedy_profit", (
+            f"LAST_STRATEGY_DEBUG should be 'greedy_profit', got: {at.session_state['LAST_STRATEGY_DEBUG']}"
         )
