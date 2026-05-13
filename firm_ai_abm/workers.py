@@ -45,7 +45,13 @@ class Workforce:
     a_trained: np.ndarray  # True if worker has completed A-mode training, bool
     tenure: np.ndarray   # periods employed at this firm, int
     hire_t: np.ndarray   # period at which worker was hired, int
+    # Defaulted fields — must come after all non-defaulted fields
+    cum_wage: np.ndarray = None  # cumulative wages while employed; __post_init__ zeros if None
     a_training_in_progress: np.ndarray = None  # True for exactly the first period of H->A transition (bool)
+
+    def __post_init__(self) -> None:
+        if self.cum_wage is None:
+            self.cum_wage = np.zeros(len(self.theta), dtype=np.float64)
 
     @property
     def K(self) -> int:
