@@ -272,6 +272,80 @@ def fig_theta_histogram(workforce_theta: np.ndarray) -> go.Figure:
     return apply_theme(fig)
 
 
+def fig_alpha_histogram(alpha: np.ndarray) -> go.Figure:
+    """Histogram of the task automatability (alpha) distribution.
+
+    Input:
+        alpha: 1-D numpy array of task alpha values sampled at make_firm time.
+            Values in [0, 1] (Beta distribution). Shape: (N,).
+    Output:
+        Figure: histogram with 20 bins, fixed x-range [0, 1]. Dashed vertical
+        line at mean alpha (omitted for empty input).
+    No disk I/O — returns Figure only.
+    """
+    alpha = np.asarray(alpha)
+    fig = go.Figure()
+    fig.add_trace(go.Histogram(
+        x=alpha,
+        nbinsx=20,
+        marker_color=THEME["colors"]["T"],
+        opacity=0.8,
+        name="alpha",
+    ))
+    if len(alpha) > 0:
+        mean_alpha = float(np.mean(alpha))
+        fig.add_vline(
+            x=mean_alpha,
+            line=dict(color=THEME["colors"]["neutral"], width=1.2, dash="dash"),
+            annotation_text=f"mean={mean_alpha:.3f}",
+            annotation_position="top right",
+        )
+    fig.update_layout(
+        title="Task Automatability (alpha) Distribution",
+        xaxis_title="alpha (automatability)",
+        yaxis_title="count",
+    )
+    fig.update_xaxes(range=[0, 1])
+    return apply_theme(fig)
+
+
+def fig_beta_histogram(beta: np.ndarray) -> go.Figure:
+    """Histogram of the task augmentability (beta) distribution.
+
+    Input:
+        beta: 1-D numpy array of task beta values sampled at make_firm time.
+            Values in [0, 1] (Beta distribution). Shape: (N,).
+    Output:
+        Figure: histogram with 20 bins, fixed x-range [0, 1]. Dashed vertical
+        line at mean beta (omitted for empty input).
+    No disk I/O — returns Figure only.
+    """
+    beta = np.asarray(beta)
+    fig = go.Figure()
+    fig.add_trace(go.Histogram(
+        x=beta,
+        nbinsx=20,
+        marker_color=THEME["colors"]["A"],
+        opacity=0.8,
+        name="beta",
+    ))
+    if len(beta) > 0:
+        mean_beta = float(np.mean(beta))
+        fig.add_vline(
+            x=mean_beta,
+            line=dict(color=THEME["colors"]["neutral"], width=1.2, dash="dash"),
+            annotation_text=f"mean={mean_beta:.3f}",
+            annotation_position="top right",
+        )
+    fig.update_layout(
+        title="Task Augmentability (beta) Distribution",
+        xaxis_title="beta (augmentability)",
+        yaxis_title="count",
+    )
+    fig.update_xaxes(range=[0, 1])
+    return apply_theme(fig)
+
+
 def fig_mean_theta_over_time(df: pd.DataFrame) -> go.Figure:
     """Mean worker skill (theta) over time.
 
