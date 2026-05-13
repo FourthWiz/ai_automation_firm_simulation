@@ -414,10 +414,17 @@ class TestAppSmoke:
                 f"Strategy radio options {set(strategy_radio.options)} != "
                 f"registry keys {set(_STRATEGY_REGISTRY.keys())}"
             )
+            # F-01 T-03: greedy_profit must have been removed from UI options
+            assert "greedy_profit" not in strategy_radio.options, (
+                "greedy_profit must be removed from the strategy radio options (F-01)"
+            )
         else:
             assert set(strategy_select.options) == set(_STRATEGY_REGISTRY.keys()), (
                 f"Strategy selectbox options {set(strategy_select.options)} != "
                 f"registry keys {set(_STRATEGY_REGISTRY.keys())}"
+            )
+            assert "greedy_profit" not in strategy_select.options, (
+                "greedy_profit must be removed from the strategy selectbox options (F-01)"
             )
 
         # No widget with key='strategy_adv' should exist anywhere
@@ -486,18 +493,19 @@ class TestAppSmoke:
                 )
 
     def test_main_panel_has_13_plots(self):
-        """P1-11.2: Main panel renders 13 plotly charts (as UnknownElement in AppTest).
+        """P1-11.2: Main panel renders 15 plotly charts (as UnknownElement in AppTest).
 
         P1-2a spike result: st.plotly_chart → UnknownElement; tabs expose inner content
-        in at.main. Empirical count = 13 UnknownElements (tabs 2+3+2+4+2).
+        in at.main. Empirical count = 15 UnknownElements (post F-02: alpha + beta
+        histograms add 2 to tab_modes; tabs layout 2+3+4+4+2 = 15).
         Verified on Streamlit 1.45.
         """
         from streamlit.testing.v1 import AppTest
         at = AppTest.from_file("app.py", default_timeout=60).run()
         assert not at.exception
         unknown_count = sum(1 for el in at.main if type(el).__name__ == "UnknownElement")
-        assert unknown_count == 13, (
-            f"Expected 13 st.plotly_chart (UnknownElement) in main panel, got {unknown_count}"
+        assert unknown_count == 15, (
+            f"Expected 15 st.plotly_chart (UnknownElement) in main panel, got {unknown_count}"
         )
 
     def test_footer_caption_content(self):
@@ -716,23 +724,28 @@ class TestDashboardMarginScenario:
         """T-06: Setting scenario=margin must NOT force strategy to horizon_optimizer.
 
         Strategy is now an independent widget; scenario is a pure pricing selector.
-        The strategy radio must retain its default value (greedy_profit) when scenario
-        is switched to margin, and the run caption must reflect that choice.
+        First, we set the strategy radio to 'all_H' explicitly (non-tautological
+        coverage: the test verifies the scenario switch does NOT change strategy).
+        Then we switch scenario to 'margin' and assert strategy remains 'all_H'.
         """
         at = self._get_at()
+        # Explicitly pick a non-default strategy first
+        strategy_radio = next((r for r in at.radio if r.key == "strategy"), None)
+        assert strategy_radio is not None, "strategy radio not found"
+        at = strategy_radio.set_value("all_H").run()
+        # Now flip to margin scenario
         scenario_radio = next((r for r in at.radio if r.key == "scenario"), None)
         if scenario_radio is None:
             pytest.skip("scenario radio not found")
-        scenario_radio.set_value("margin")
-        at = at.run()
-        # Strategy radio should still be at its default (greedy_profit)
+        at = scenario_radio.set_value("margin").run()
+        # Strategy radio should still be all_H (scenario did NOT auto-lock it)
         strategy_radio = next((r for r in at.radio if r.key == "strategy"), None)
         assert strategy_radio is not None, "strategy radio not found"
-        assert strategy_radio.value == "greedy_profit", (
-            f"Expected strategy default 'greedy_profit' after setting scenario=margin, "
+        assert strategy_radio.value == "all_H", (
+            f"Expected strategy to remain 'all_H' after setting scenario=margin, "
             f"got: {strategy_radio.value}"
         )
-        # LAST_STRATEGY_DEBUG must reflect greedy_profit (not horizon_optimizer)
-        assert at.session_state["LAST_STRATEGY_DEBUG"] == "greedy_profit", (
-            f"LAST_STRATEGY_DEBUG should be 'greedy_profit', got: {at.session_state['LAST_STRATEGY_DEBUG']}"
+        # LAST_STRATEGY_DEBUG must reflect all_H (not horizon_optimizer)
+        assert at.session_state["LAST_STRATEGY_DEBUG"] == "all_H", (
+            f"LAST_STRATEGY_DEBUG should be 'all_H', got: {at.session_state['LAST_STRATEGY_DEBUG']}"
         )
