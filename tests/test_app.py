@@ -47,27 +47,31 @@ def test_enable_training_delay_checkbox_defaults_true():
 
 
 def test_cache_key_length():
-    """T-16: cache key has exactly 36 elements; _PARAM_FIELDS has exactly 35.
+    """T-16: cache key has exactly 38 elements; _PARAM_FIELDS has exactly 37.
 
-    Updated from 34/35 to 35/36 after max_hire_per_step added at index 29:
+    Updated from 36/37 to 37/38 after splitting the prior field into dp_prior_alpha (index 35)
+    and dp_prior_beta (index 36):
     max_hire_per_step (29), hire_delay_periods (30), alpha_mean (31),
-    alpha_concentration (32), beta_mean (33), beta_concentration (34).
-    seed is still key[-1] at position 35.
+    alpha_concentration (32), beta_mean (33), beta_concentration (34),
+    dp_prior_alpha (35), dp_prior_beta (36). seed is still key[-1] at position 37.
     """
-    assert len(_PARAM_FIELDS) == 35, (
-        f"Expected 35 fields in _PARAM_FIELDS, got {len(_PARAM_FIELDS)}"
+    assert len(_PARAM_FIELDS) == 37, (
+        f"Expected 37 fields in _PARAM_FIELDS, got {len(_PARAM_FIELDS)}"
     )
     key = params_to_key(FirmParams(), 0)
-    assert len(key) == 36, (
-        f"Expected 36-tuple from params_to_key, got {len(key)}"
+    assert len(key) == 38, (
+        f"Expected 38-tuple from params_to_key, got {len(key)}"
     )
     # Spot-check: index 26 = enable_hiring (unchanged), 27 = enable_replenish_hiring,
-    # 29 = max_hire_per_step, 31 = alpha_mean, 34 = beta_concentration, -1 = seed at position 35.
+    # 29 = max_hire_per_step, 31 = alpha_mean, 34 = beta_concentration,
+    # 35 = dp_prior_alpha, 36 = dp_prior_beta, -1 = seed (position 37).
     assert key[26] == FirmParams().enable_hiring, f"key[26] should be enable_hiring, got {key[26]}"
     assert key[27] == FirmParams().enable_replenish_hiring, f"key[27] should be enable_replenish_hiring, got {key[27]}"
     assert key[29] == FirmParams().max_hire_per_step, f"key[29] should be max_hire_per_step, got {key[29]}"
     assert key[31] == FirmParams().alpha_mean, f"key[31] should be alpha_mean, got {key[31]}"
     assert key[34] == FirmParams().beta_concentration, f"key[34] should be beta_concentration, got {key[34]}"
+    assert key[35] == FirmParams().dp_prior_alpha, f"key[35] should be dp_prior_alpha, got {key[35]}"
+    assert key[36] == FirmParams().dp_prior_beta, f"key[36] should be dp_prior_beta, got {key[36]}"
     assert key[-1] == 0, f"key[-1] should be seed=0, got {key[-1]}"
 
 

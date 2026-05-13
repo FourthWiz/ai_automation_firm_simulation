@@ -79,16 +79,16 @@ class Firm:
         alpha_hat/beta_hat are also run-state: cleared here to prior mean so each fresh
         run_simulation call starts with uninformed beliefs (D-04 in dp-optimizer plan).
         """
-        from firm_ai_abm.dp_optimizer import _DP_PRIOR_MEAN  # function-scope to avoid cycle
         N = self.params.N
         self.modes = np.zeros(N, dtype=int)  # all H = Mode.H = 0
         self.history = []
         self.pending_hires = []
         self.closed_worker_wages = []
         self._margin_cache: dict = {}  # type: ignore[attr-defined]
-        # Posterior arrays — run-state; reset to prior mean on every fresh run.
-        self.alpha_hat = np.full(N, _DP_PRIOR_MEAN, dtype=np.float64)
-        self.beta_hat = np.full(N, _DP_PRIOR_MEAN, dtype=np.float64)
+        # Posterior arrays — run-state; reset to uninformed priors on every fresh run.
+        # dp_prior_alpha and dp_prior_beta are independent: defaults differ per dimension.
+        self.alpha_hat = np.full(N, self.params.dp_prior_alpha, dtype=np.float64)
+        self.beta_hat = np.full(N, self.params.dp_prior_beta, dtype=np.float64)
         # Intent attributes — run-state; zeroed here so a non-calling strategy
         # never reads stale values from a prior period.
         # _fire_intent: set by strategies (or 0 for non-participating strategies);

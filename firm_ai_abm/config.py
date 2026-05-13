@@ -60,6 +60,8 @@ class FirmParams:
     scenario_mode: str = "price"   # "price" or "margin"
     target_margin: float = 0.05    # target (revenue - cost) / revenue when scenario_mode == "margin"
     margin_horizon: int = 5        # look-ahead periods for margin-optimizer brute grid
+    dp_prior_alpha: float = 0.5    # Bayesian prior mean for alpha_hat at run start (automatability prior)
+    dp_prior_beta: float = 0.7    # Bayesian prior mean for beta_hat at run start (augmentability prior)
 
     # Phase 1.5 Stage X — opt-in replenishment hiring (augment-replenish-hiring)
     # Dormant by default (enable_replenish_hiring=False). Mutually exclusive with

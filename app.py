@@ -91,12 +91,13 @@ _STRATEGY_REGISTRY = {
     "horizon_optimizer": dp_rolling_horizon_strategy,  # new DP rolling-horizon optimizer (F-03)
 }
 
-# 35 scalar FirmParams fields in order (excludes 'seed' which is appended separately)
+# 36 scalar FirmParams fields in order (excludes 'seed' which is appended separately)
 # Indices: 0=N, 15=sigma_theta, 20=T_review, 21=firing_threshold, 22=scenario_mode,
 #          23=target_margin, 24=margin_horizon, 25=enable_training_delay,
 #          26=enable_hiring, 27=enable_replenish_hiring, 28=max_hire_period,
 #          29=max_hire_per_step, 30=hire_delay_periods, 31=alpha_mean,
-#          32=alpha_concentration, 33=beta_mean, 34=beta_concentration, -1=seed (position 35)
+#          32=alpha_concentration, 33=beta_mean, 34=beta_concentration,
+#          35=dp_prior_alpha, 36=dp_prior_beta, -1=seed (position 37, still key[-1])
 # NOTE: alpha-cost fields (c_auto_alpha_slope, c_auto_alpha_intercept, belief_alpha)
 # and enable_horizon_brute_action_grid are intentionally absent — no sidebar exposure.
 _PARAM_FIELDS = (
@@ -116,7 +117,9 @@ _PARAM_FIELDS = (
     "alpha_mean",                   # index 31
     "alpha_concentration",          # index 32
     "beta_mean",                    # index 33
-    "beta_concentration",           # index 34; seed moves to position 35 (still key[-1])
+    "beta_concentration",           # index 34
+    "dp_prior_alpha",               # index 35
+    "dp_prior_beta",                # index 36; seed moves to position 37 (still key[-1])
 )
 
 # Named index constant for sigma_theta (used in tab_het branch logic)
@@ -456,6 +459,25 @@ def _build_controls() -> tuple:
                 help="Look-ahead periods for margin-optimizer brute grid",
                 key="margin_horizon",
             )
+            dp_prior_alpha_val = st.slider(
+                "dp_prior_alpha (automatability prior — horizon_optimizer)",
+                0.0, 1.0, float(FirmParams().dp_prior_alpha), 0.05,
+                help=(
+                    "Bayesian prior mean for task automatability (alpha_hat) at run start. "
+                    "Used only by horizon_optimizer. Default 0.5 matches the alpha distribution mean."
+                ),
+                key="dp_prior_alpha",
+            )
+            dp_prior_beta_val = st.slider(
+                "dp_prior_beta (augmentability prior — horizon_optimizer)",
+                0.0, 1.0, float(FirmParams().dp_prior_beta), 0.05,
+                help=(
+                    "Bayesian prior mean for task augmentability (beta_hat) at run start. "
+                    "Used only by horizon_optimizer. Default 0.7 makes the optimizer more "
+                    "bullish on augmentation gains than the beta distribution mean (0.5)."
+                ),
+                key="dp_prior_beta",
+            )
 
         # Heterogeneity: task attributes (alpha, beta) + worker (theta, wage)
         with adv_tabs[2]:
@@ -597,6 +619,8 @@ def _build_controls() -> tuple:
         alpha_concentration=float(alpha_concentration),
         beta_mean=float(beta_mean),
         beta_concentration=float(beta_concentration),
+        dp_prior_alpha=float(dp_prior_alpha_val),
+        dp_prior_beta=float(dp_prior_beta_val),
         seed=int(seed),
     )
     key = params_to_key(draft_params, int(seed))

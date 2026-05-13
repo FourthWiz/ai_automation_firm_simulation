@@ -468,6 +468,7 @@ def test_action_grid_improves_objective_when_fires_help():
         margin_horizon=3,
         enable_horizon_brute_action_grid=True,
         max_hire_per_step=0,
+        dp_prior_alpha=0.9, dp_prior_beta=0.9,  # optimistic priors make T/A-mode attractive, so firing + augmenting wins
     )
     firm = make_firm(params)
 
@@ -533,6 +534,10 @@ def test_action_grid_writes_fire_hire_intent():
 
     # t=5 with T_review=5: _is_review_period(5, 5) == True, so fire candidates exist.
     # High wage (3.0) and low price (0.5) make firing strictly optimal at a review period.
+    # dp_prior_alpha=0.9, dp_prior_beta=0.9: optimistic priors make T/A-mode attractive after
+    # firing, so the action-grid chooses n_fire > 0. With calibrated priors (0.5), H and T
+    # modes have equal expected profitability so firing provides no benefit — this test targets
+    # the action-grid WIRING under optimistic priors, not prior calibration.
     params = FirmParams(
         seed=9, N=30, tasks_per_worker=5,
         sigma_theta=0.0, sigma_w=0.0,
@@ -541,6 +546,7 @@ def test_action_grid_writes_fire_hire_intent():
         enable_horizon_brute_action_grid=True,
         max_hire_per_step=0,
         margin_horizon=2,
+        dp_prior_alpha=0.9, dp_prior_beta=0.9,
     )
     firm = make_firm(params)
 
