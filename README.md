@@ -2,6 +2,31 @@
 
 Agent-based simulation of tech firms responding to AI. Firms choose between human, AI-augmented, and automated production modes across a portfolio of tasks. A labor market layer adds worker mobility and wage spillovers.
 
+## Public simulator
+
+An interactive browser-based version of this simulation is available. The dashboard lets you explore how a single firm navigates the human-vs-AI production decision in real time.
+
+![Dashboard screenshot](docs/dashboard.png)
+
+**What it shows:**
+
+- **Outcomes tab** — per-period and cumulative profit over 60 simulated periods
+- **Workforce tab** — how the firm's headcount evolves, including hiring and firing events
+- **Tasks & modes tab** — the mix of human (H), AI-augmented (A), and fully automated (T) tasks over time
+- **Wages tab** — individual wage distributions and mean accumulated earnings
+- **Worker heterogeneity tab** — the distribution of worker skill (theta) and how it shifts
+
+**Key dials to try:**
+
+- **AI productivity ceiling (q_a)** — raise this above 1.0 to make automation more attractive; at q_a ≈ 1.5 most strategies shift heavily into T-mode
+- **Augmentation gain (g)** — how much a human worker benefits from AI tools; higher g favors A-mode (augmented) over pure automation
+- **Automation cost per task (c_auto)** — the per-task fee for running an AI agent; lowering this past a threshold tips the firm from augmentation into automation
+- **Wage rate (w)** — raising wages makes human labor more expensive relative to automation
+
+Hit **▶ Run simulation** after adjusting any dial. The KPI strip at the top updates instantly with cumulative profit, final workforce size, and the dominant production mode.
+
+> **Note on first load:** if the app is hosted on the free tier it may take ~30 seconds to wake up after a period of inactivity. Give it a moment.
+
 ## Install
 
 Kernel only (simulation + analysis):
@@ -23,7 +48,7 @@ Dashboard (adds Streamlit):
 .venv/bin/streamlit run app.py
 ```
 
-Opens at `http://localhost:8501`. The sidebar exposes all 22 simulation parameters grouped into 7 expanders. Click **Run** to execute a simulation; plots update in a 4×2 grid.
+Opens at `http://localhost:8501`. Primary controls (strategy, firm size, AI productivity, wages, costs) are in the main panel. An **Advanced parameters** expander below holds 24 additional controls. Click **▶ Run simulation** to run; 13 charts update across 5 tabs.
 
 ## Validate
 
