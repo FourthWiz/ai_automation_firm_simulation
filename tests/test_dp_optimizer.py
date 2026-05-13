@@ -600,19 +600,26 @@ def test_forward_sim_theta_flat_counterfactual():
     path = [(0, 0), (0, 0), (0, 0)]
     pi_fwd = _forward_simulate(firm, 0, path, horizon=3)
 
-    # Compute expected path_pi under theta-flat (theta_per_task=None → ones)
+    # Compute expected path_pi under theta-flat (theta_per_task=None → ones).
+    # Wage bill uses assigned-workers-only (MIN-1 fix): active K determined from
+    # H/A task count, wages from actual workforce.wage[:K_active].
+    from firm_ai_abm.production import Mode as _Mode
     alpha_hat = firm.alpha_hat
     beta_hat = firm.beta_hat
     f_modes = firm.modes.copy()
+    f_wage = firm.workforce.wage.copy()
     K = firm.workforce.K
 
     expected_pi = 0.0
     for s in range(3):
         prev_modes = f_modes.copy()
+        n_HA = int(((f_modes == int(_Mode.H)) | (f_modes == int(_Mode.A))).sum())
+        K_active = min(n_HA // params.tasks_per_worker, K)
+        wage_bill = float(f_wage[:K_active].sum()) if K_active > 0 else 0.0
         prod = productivity_vec(f_modes, alpha=alpha_hat, beta=beta_hat, params=params)
         cost = (
             cost_vec(f_modes, alpha=alpha_hat, params=params).sum()
-            + K * params.w
+            + wage_bill
             + params.F
         )
         expected_pi += params.p * prod.sum() - cost - adj_cost(prev_modes, f_modes, params, workforce=None)

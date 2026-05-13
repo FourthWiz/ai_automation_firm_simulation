@@ -269,6 +269,11 @@ def _build_controls() -> tuple:
             key="strategy",
             horizontal=True,
         )
+        st.caption(
+            "horizon_optimizer uses DP with optimistic priors at t=0 — "
+            "recommends all-A until per-task alpha/beta are learned. "
+            "Use horizon_brute to compare the brute-grid approach."
+        )
 
     with col_a2:
         T = st.number_input(

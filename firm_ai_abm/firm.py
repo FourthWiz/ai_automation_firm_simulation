@@ -69,6 +69,9 @@ class Firm:
         # Posterior arrays — run-state; reset to prior mean on every fresh run.
         self.alpha_hat = np.full(N, _DP_PRIOR_MEAN, dtype=np.float64)
         self.beta_hat = np.full(N, _DP_PRIOR_MEAN, dtype=np.float64)
+        # DP fire-count hint — run-state; zeroed here so a non-DP strategy
+        # inheriting this firm never reads a stale value (MIN-3 defensive clear).
+        self._dp_optimizer_n_fire = 0  # type: ignore[attr-defined]
         # workforce is NOT re-sampled here — it persists for the firm's lifetime.
         # cum_wage IS zeroed because it is run-state (like pending_hires), not firm-identity state.
         if self.workforce is not None:

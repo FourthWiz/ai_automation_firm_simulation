@@ -7,7 +7,7 @@ to pre-allocated numpy columns.
 Phase 1.5 Stage 1 additions:
   - theta_per_task threaded through productivity_vec (D-02 multiplicative)
   - wage_bill from ASSIGNED workers only (D-03: deviation from architecture §5 for all_T parity)
-  - firm.K is now a read-only property; step 5 uses local K_modes variable
+  - firm.K is now a read-only property; K_modes is a local variable computed at Step 2.5
   - History gains 3 new columns: wage_bill, mean_theta, mean_wage
 
 Phase 1.5 Stage 2 additions:
