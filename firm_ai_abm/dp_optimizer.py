@@ -6,7 +6,8 @@ Typical dashboard (T_review=5, horizon=3): 125–625 paths per call.
 
 Posteriors are run-state: alpha_hat[i] and beta_hat[i] are updated in-place
 as tasks are observed running in modes T and A respectively. They are cleared
-to _DP_PRIOR_MEAN by Firm.reset() on each fresh run_simulation call.
+to params.dp_prior_alpha / params.dp_prior_beta by Firm.reset() on each fresh
+run_simulation call.
 
 Forward simulation: _forward_simulate is a thin adapter over the shared
 forward_simulate_action_path from firm_ai_abm.forward_sim. It translates

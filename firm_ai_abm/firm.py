@@ -30,16 +30,16 @@ class Firm:
     closed_worker_wages: list = field(default_factory=list)
 
     # Bayesian per-task posterior means for the DP optimizer (F-03).
-    # Initialized to _DP_PRIOR_MEAN (0.9) at construction via make_firm; revealed
-    # exactly when a task runs in the corresponding mode (T reveals alpha_i; A reveals
-    # beta_i). Within-run state ONLY: cleared by reset() (run-state, like
-    # history/pending_hires).
+    # Initialized to params.dp_prior_alpha / params.dp_prior_beta at construction via
+    # make_firm; defaults differ per dimension (0.5 / 0.7). Revealed exactly when a
+    # task runs in the corresponding mode (T reveals alpha_i; A reveals beta_i).
+    # Within-run state ONLY: cleared by reset() (run-state, like history/pending_hires).
     # alpha_hat[i] is the posterior mean for task i's automatability.
     # beta_hat[i] is the posterior mean for task i's augmentability.
     # Independent of belief_alpha (which is a SCALAR firm-wide prior used by greedy
     # strategies); alpha_hat/beta_hat are PER-TASK and only read by the DP optimizer.
-    # Default None: will be initialized by make_firm (lazy import of _DP_PRIOR_MEAN
-    # to avoid module-load-time circular imports firm.py → dp_optimizer.py → firm.py).
+    # Default None: will be initialized by make_firm using params.dp_prior_alpha /
+    # params.dp_prior_beta.
     alpha_hat: np.ndarray | None = None
     beta_hat: np.ndarray | None = None
 
