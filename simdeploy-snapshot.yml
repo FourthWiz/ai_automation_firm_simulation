@@ -1,0 +1,356 @@
+- generic [active]:
+  - generic [ref=e3]:
+    - banner
+    - generic [ref=e6]:
+      - heading "Firm Behavior under AI" [level=1] [ref=e11]:
+        - text: Firm Behavior under AI
+        - generic [ref=e12]:
+          - link "Link to heading":
+            - /url: "#firm-behavior-under-ai"
+            - img
+      - paragraph [ref=e17]: An agent-based simulator of how firms choose between human, AI-augmented, and fully automated production. Adjust the dials, hit Run, and see how profit, workforce, and task mix evolve over 60 periods.
+      - generic [ref=e19]:
+        - generic [ref=e23]:
+          - paragraph [ref=e27]: Strategy
+          - radiogroup "Strategy" [ref=e28] [cursor=pointer]:
+            - generic [ref=e29]:
+              - radio "greedy_profit" [checked]
+              - paragraph [ref=e34]: greedy_profit
+            - generic [ref=e35]:
+              - radio "greedy_with_switching"
+              - paragraph [ref=e40]: greedy_with_switching
+        - generic [ref=e44]:
+          - generic [ref=e45]:
+            - paragraph [ref=e48]: T
+            - button "Help for T" [ref=e52] [cursor=pointer]:
+              - img [ref=e53]
+          - generic [ref=e56]:
+            - spinbutton "T" [ref=e59]: "60"
+            - generic [ref=e60]:
+              - button [ref=e61] [cursor=pointer]:
+                - img [ref=e62]
+              - button [ref=e64] [cursor=pointer]:
+                - img [ref=e65]
+        - generic [ref=e70]:
+          - generic [ref=e71]:
+            - paragraph [ref=e74]: Firm size in tasks (N)
+            - button "Help for Firm size in tasks (N)" [ref=e78] [cursor=pointer]:
+              - img [ref=e79]
+          - generic [ref=e82]:
+            - spinbutton "Firm size in tasks (N)" [ref=e85]: "100"
+            - generic [ref=e86]:
+              - button [ref=e87] [cursor=pointer]:
+                - img [ref=e88]
+              - button [ref=e90] [cursor=pointer]:
+                - img [ref=e91]
+      - generic [ref=e94]:
+        - generic [ref=e99]:
+          - generic [ref=e100]:
+            - paragraph [ref=e103]: AI productivity ceiling (q_a)
+            - button "Help for AI productivity ceiling (q_a)" [ref=e107] [cursor=pointer]:
+              - img [ref=e108]
+          - generic [ref=e111]:
+            - slider "AI productivity ceiling (q_a)" [ref=e115]:
+              - generic:
+                - generic:
+                  - paragraph: "1.20"
+            - generic:
+              - generic:
+                - paragraph: "0.00"
+              - generic:
+                - paragraph: "3.00"
+        - generic [ref=e121]:
+          - generic [ref=e122]:
+            - paragraph [ref=e125]: Augmentation gain (g)
+            - button "Help for Augmentation gain (g)" [ref=e129] [cursor=pointer]:
+              - img [ref=e130]
+          - generic [ref=e133]:
+            - slider "Augmentation gain (g)" [ref=e137]:
+              - generic:
+                - generic:
+                  - paragraph: "0.50"
+            - generic:
+              - generic:
+                - paragraph: "0.00"
+              - generic:
+                - paragraph: "3.00"
+        - generic [ref=e143]:
+          - generic [ref=e144]:
+            - paragraph [ref=e147]: Automation cost per task (c_auto)
+            - button "Help for Automation cost per task (c_auto)" [ref=e151] [cursor=pointer]:
+              - img [ref=e152]
+          - generic [ref=e155]:
+            - slider "Automation cost per task (c_auto)" [ref=e159]:
+              - generic:
+                - generic:
+                  - paragraph: "0.40"
+            - generic:
+              - generic:
+                - paragraph: "0.00"
+              - generic:
+                - paragraph: "2.00"
+        - generic [ref=e165]:
+          - generic [ref=e166]:
+            - paragraph [ref=e169]: Wage rate (w)
+            - button "Help for Wage rate (w)" [ref=e173] [cursor=pointer]:
+              - img [ref=e174]
+          - generic [ref=e177]:
+            - slider "Wage rate (w)" [ref=e181]:
+              - generic:
+                - generic:
+                  - paragraph: "1.00"
+            - generic:
+              - generic:
+                - paragraph: "0.00"
+              - generic:
+                - paragraph: "5.00"
+      - generic [ref=e184]:
+        - generic [ref=e185]:
+          - paragraph [ref=e188]: Hiring policy
+          - button "Help for Hiring policy" [ref=e192] [cursor=pointer]:
+            - img [ref=e193]
+        - radiogroup "Hiring policy" [ref=e196] [cursor=pointer]:
+          - generic [ref=e197]:
+            - radio "off" [checked]
+            - paragraph [ref=e202]: "off"
+          - generic [ref=e203]:
+            - radio "enable_hiring"
+            - paragraph [ref=e208]: enable_hiring
+          - generic [ref=e209]:
+            - radio "enable_replenish_hiring"
+            - paragraph [ref=e214]: enable_replenish_hiring
+      - generic [ref=e216]:
+        - generic [ref=e220]:
+          - generic [ref=e221]:
+            - paragraph [ref=e224]: Tasks per worker
+            - button "Help for Tasks per worker" [ref=e228] [cursor=pointer]:
+              - img [ref=e229]
+          - generic [ref=e232]:
+            - spinbutton "Tasks per worker" [ref=e235]: "5"
+            - generic [ref=e236]:
+              - button [ref=e237] [cursor=pointer]:
+                - img [ref=e238]
+              - button [ref=e240] [cursor=pointer]:
+                - img [ref=e241]
+        - generic [ref=e247]:
+          - generic [ref=e248]:
+            - paragraph [ref=e251]: T_review
+            - button "Help for T_review" [ref=e255] [cursor=pointer]:
+              - img [ref=e256]
+          - generic [ref=e259]:
+            - slider "T_review" [ref=e263]:
+              - generic:
+                - generic:
+                  - paragraph: "5"
+            - generic:
+              - generic:
+                - paragraph: "5"
+              - generic:
+                - paragraph: inf
+        - generic [ref=e268]:
+          - generic [ref=e269]:
+            - paragraph [ref=e272]: hire_delay_periods
+            - button "Help for hire_delay_periods" [ref=e276] [cursor=pointer]:
+              - img [ref=e277]
+          - generic [ref=e280]:
+            - spinbutton "hire_delay_periods" [disabled] [ref=e283]: "1"
+            - generic [ref=e284]:
+              - button [disabled] [ref=e285]:
+                - img [ref=e286]
+              - button [disabled] [ref=e288]:
+                - img [ref=e289]
+        - generic [ref=e294]:
+          - generic [ref=e295]:
+            - paragraph [ref=e298]: max_hire_period
+            - button "Help for max_hire_period" [ref=e302] [cursor=pointer]:
+              - img [ref=e303]
+          - generic [ref=e306]:
+            - spinbutton "max_hire_period" [disabled] [ref=e309]: "5"
+            - generic [ref=e310]:
+              - button [disabled] [ref=e311]:
+                - img [ref=e312]
+              - button [disabled] [ref=e314]:
+                - img [ref=e315]
+      - group [ref=e319]:
+        - generic "keyboard_arrow_right Advanced parameters" [ref=e320] [cursor=pointer]:
+          - generic [ref=e321]:
+            - generic [ref=e323]: keyboard_arrow_right
+            - paragraph [ref=e326]: Advanced parameters
+      - generic [ref=e328]:
+        - button "▶ Run simulation" [ref=e333] [cursor=pointer]:
+          - paragraph [ref=e337]: ▶ Run simulation
+        - button "Reset to defaults" [ref=e345] [cursor=pointer]:
+          - paragraph [ref=e349]: Reset to defaults
+      - paragraph [ref=e354]: "Strategy: greedy_profit — seed: 0"
+      - alert [ref=e357]:
+        - paragraph [ref=e362]: Workforce dropped >50% during run (K_initial=20, K_final=0) — try a lower firing_threshold.
+      - generic [ref=e364]:
+        - generic [ref=e369]:
+          - paragraph [ref=e372]: Cumulative profit
+          - paragraph [ref=e375]: "-1718.42"
+        - generic [ref=e380]:
+          - paragraph [ref=e383]: Final workforce (K)
+          - paragraph [ref=e386]: "0"
+        - generic [ref=e391]:
+          - paragraph [ref=e394]: Dominant mode
+          - paragraph [ref=e397]: Automated
+          - generic [ref=e399]:
+            - img [ref=e400]
+            - paragraph [ref=e404]: 89% of tasks
+      - generic [ref=e406]:
+        - tablist [ref=e408]:
+          - tab "Outcomes" [selected] [ref=e409] [cursor=pointer]:
+            - paragraph [ref=e411]: Outcomes
+          - tab "Workforce" [ref=e412] [cursor=pointer]:
+            - paragraph [ref=e414]: Workforce
+          - tab "Tasks & modes" [ref=e415] [cursor=pointer]:
+            - paragraph [ref=e417]: Tasks & modes
+          - tab "Wages" [ref=e418] [cursor=pointer]:
+            - paragraph [ref=e420]: Wages
+          - tab "Worker heterogeneity" [ref=e421] [cursor=pointer]:
+            - paragraph [ref=e423]: Worker heterogeneity
+        - tabpanel "Outcomes" [ref=e426]:
+          - generic [ref=e427]:
+            - generic [ref=e433]:
+              - img:
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic: "0"
+                      - generic:
+                        - generic: "10"
+                      - generic:
+                        - generic: "20"
+                      - generic:
+                        - generic: "30"
+                      - generic:
+                        - generic: "40"
+                      - generic:
+                        - generic: "50"
+                    - generic:
+                      - generic:
+                        - generic: −80
+                      - generic:
+                        - generic: −70
+                      - generic:
+                        - generic: −60
+                      - generic:
+                        - generic: −50
+                      - generic:
+                        - generic: −40
+                      - generic:
+                        - generic: −30
+                      - generic:
+                        - generic: −20
+                      - generic:
+                        - generic: −10
+                      - generic:
+                        - generic: "0"
+              - img:
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic: Per-Period Profit
+                  - generic:
+                    - generic: period
+                  - generic:
+                    - generic: profit
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic: mean=-28.64
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic: first firing t=5
+              - toolbar [ref=e447]:
+                - button "Download plot as a PNG" [ref=e449] [cursor=pointer]:
+                  - img [ref=e450]
+                - generic [ref=e452]:
+                  - button "Zoom" [ref=e453] [cursor=pointer]:
+                    - img [ref=e454]
+                  - button "Pan" [ref=e456] [cursor=pointer]:
+                    - img [ref=e457]
+                - generic [ref=e459]:
+                  - button "Zoom in" [ref=e460] [cursor=pointer]:
+                    - img [ref=e461]
+                  - button "Zoom out" [ref=e463] [cursor=pointer]:
+                    - img [ref=e464]
+                  - button "Autoscale" [ref=e466] [cursor=pointer]:
+                    - img [ref=e467]
+                  - button "Reset axes" [ref=e469] [cursor=pointer]:
+                    - img [ref=e470]
+                - button "Fullscreen" [ref=e473] [cursor=pointer]:
+                  - img [ref=e474]
+              - img
+            - generic [ref=e481]:
+              - img:
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic: "0"
+                      - generic:
+                        - generic: "10"
+                      - generic:
+                        - generic: "20"
+                      - generic:
+                        - generic: "30"
+                      - generic:
+                        - generic: "40"
+                      - generic:
+                        - generic: "50"
+                    - generic:
+                      - generic:
+                        - generic: −1800
+                      - generic:
+                        - generic: −1600
+                      - generic:
+                        - generic: −1400
+                      - generic:
+                        - generic: −1200
+                      - generic:
+                        - generic: −1000
+                      - generic:
+                        - generic: −800
+                      - generic:
+                        - generic: −600
+                      - generic:
+                        - generic: −400
+                      - generic:
+                        - generic: −200
+                      - generic:
+                        - generic: "0"
+              - img:
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic: Cumulative Profit
+                  - generic:
+                    - generic: period
+                  - generic:
+                    - generic: cumulative profit
+              - toolbar [ref=e495]:
+                - button "Download plot as a PNG" [ref=e497] [cursor=pointer]:
+                  - img [ref=e498]
+                - generic [ref=e500]:
+                  - button "Zoom" [ref=e501] [cursor=pointer]:
+                    - img [ref=e502]
+                  - button "Pan" [ref=e504] [cursor=pointer]:
+                    - img [ref=e505]
+                - generic [ref=e507]:
+                  - button "Zoom in" [ref=e508] [cursor=pointer]:
+                    - img [ref=e509]
+                  - button "Zoom out" [ref=e511] [cursor=pointer]:
+                    - img [ref=e512]
+                  - button "Autoscale" [ref=e514] [cursor=pointer]:
+                    - img [ref=e515]
+                  - button "Reset axes" [ref=e517] [cursor=pointer]:
+                    - img [ref=e518]
+                - button "Fullscreen" [ref=e521] [cursor=pointer]:
+                  - img [ref=e522]
+              - img
+      - paragraph [ref=e528]: "corr = N/A (workforce dropped to K=0; consider reducing firing_threshold) total firings = 20 Hires: 0 (path: none) final K_active = 0"
+      - paragraph [ref=e533]: "sim invocations this session: 1"
+  - img [ref=e534]
