@@ -63,10 +63,9 @@ class Firm:
         assert not (fire > 0 and hire > 0), (
             f"_fire_intent ({fire}) and _hire_intent ({hire}) are mutually exclusive per period"
         )
-        if self.params.enable_hiring:
-            assert hire == 0, (
-                f"_hire_intent must be 0 under enable_hiring=True; got {hire}"
-            )
+        # enable_hiring=True path: horizon_brute_strategy may write a non-zero
+        # _hire_intent when enable_horizon_brute_action_grid=True; Step 0.5 consumes it.
+        # No assert here — path-(a) design allows intents under enable_hiring.
 
     def reset(self) -> None:
         """Reset modes/history/pending_hires/posteriors. NEVER touches alpha, beta, or workforce.
