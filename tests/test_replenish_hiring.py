@@ -203,6 +203,32 @@ def test_dormant_no_validation():
 
 
 # ---------------------------------------------------------------------------
+# T-01 (D-02): enable_hiring path also validated by validate_hiring_params
+# ---------------------------------------------------------------------------
+
+
+def test_enable_hiring_delay_zero_raises():
+    """enable_hiring=True with hire_delay_periods=0 → ValueError (same as replenish path)."""
+    params = FirmParams(enable_hiring=True, hire_delay_periods=0)
+    with pytest.raises(ValueError, match="hire_delay_periods must be >= 1"):
+        make_firm(params)
+
+
+def test_enable_hiring_negative_max_hire_raises():
+    """enable_hiring=True with max_hire_period=-1 → ValueError."""
+    params = FirmParams(enable_hiring=True, max_hire_period=-1)
+    with pytest.raises(ValueError, match="max_hire_period must be >= 0"):
+        make_firm(params)
+
+
+def test_enable_hiring_valid_defaults_succeeds():
+    """enable_hiring=True with default hire_delay_periods=1 and max_hire_period=0 → no error."""
+    params = FirmParams(enable_hiring=True)
+    firm = make_firm(params)  # must not raise
+    assert firm is not None
+
+
+# ---------------------------------------------------------------------------
 # T-15: numeraire invariance with replenish active (wraps check11)
 # ---------------------------------------------------------------------------
 

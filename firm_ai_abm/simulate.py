@@ -119,27 +119,37 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
             )
 
         # -------------------------------------------------------------------
-        # Step 0.5: opt-in hire-back to firm-determined K* (after apply_firings)
+        # Step 0.5: opt-in hire-back with delay (after apply_firings)
+        # Mutually exclusive with Step 0.5b (enforced at make_firm).
+        # With enable_hiring=False (default), this branch is never entered.
+        # Queue payload is a relative delta (K* - K_post_fire) queued at fire
+        # period t. Valid while wf.K is invariant over [t, t+hire_delay_periods).
+        # n_hired[t] == 0 at fire period; hires appear at t+hire_delay_periods.
+        # See D-02, D-06.
         # -------------------------------------------------------------------
         n_hired_period = 0
         period_hire_cost = 0.0
-        if params.enable_hiring and n_review_fired_period > 0:
-            # K* = firm-determined optimal target based on expected surplus of an
-            # average new hire. Replaces the prior K0 target. Gated on
-            # enable_hiring=True; default-False path is unchanged.
-            K_target = optimal_hire_target(
-                firm, t, output_per_worker, aug_cost_per_worker, params
-            )
-            K_before_hire = firm.workforce.K
-            firm.workforce, output_per_worker, aug_cost_per_worker = replace_to_target(
-                firm, K_target, t, output_per_worker, aug_cost_per_worker
-            )
-            n_hired_period = firm.workforce.K - K_before_hire
-            period_hire_cost = float(params.c_hire) * n_hired_period
+        if params.enable_hiring:
+            if n_review_fired_period > 0:
+                # Compute K* NOW using just-fired workforce trailing data.
+                K_target = optimal_hire_target(
+                    firm, t, output_per_worker, aug_cost_per_worker, params
+                )
+                n_target_hires = max(0, K_target - firm.workforce.K)
+                if n_target_hires > 0:
+                    firm.pending_hires.append((t + params.hire_delay_periods, n_target_hires))
+            # Drain due backlog entries (shared drainer; enforces K_max cap).
+            (
+                firm.workforce,
+                output_per_worker,
+                aug_cost_per_worker,
+                n_hired_period,
+                period_hire_cost,
+            ) = replenish_hire_step(firm, t, output_per_worker, aug_cost_per_worker)
 
         # -------------------------------------------------------------------
         # Step 0.5b: opt-in replenishment hiring (Phase 1.5 Stage X)
-        # Mutually exclusive with Step 0.5 (T-02 enforces at make_firm).
+        # Mutually exclusive with Step 0.5 (enforced at make_firm).
         # With enable_replenish_hiring=False (default), this branch is never
         # entered — no allocations, no new columns, byte-identical to prior runs.
         # n_hired[t] == 0 at t where firings occurred (delay >= 1); hires appear
