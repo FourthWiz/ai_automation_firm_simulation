@@ -9,8 +9,6 @@ from firm_ai_abm.strategy import (
 from firm_ai_abm.simulate import run_simulation, run_horizon
 from firm_ai_abm.workers import Workforce, sample_workforce, task_to_worker_map, _make_initial_workforce
 from firm_ai_abm.review import firing_review, apply_firings, replace_to_target  # Stage 5 D-12: apply_firings_and_replace removed; split into apply_firings + replace_to_target
-from firm_ai_abm.viz import fig1_primary_lines, fig2_small_multiples_q_a, fig3_mode_mix_greedy
-
 __all__ = [
     "FirmParams",
     "Firm",
@@ -36,8 +34,4 @@ __all__ = [
     "firing_review",
     "apply_firings",
     "replace_to_target",
-    # Visualization
-    "fig1_primary_lines",
-    "fig2_small_multiples_q_a",
-    "fig3_mode_mix_greedy",
 ]
