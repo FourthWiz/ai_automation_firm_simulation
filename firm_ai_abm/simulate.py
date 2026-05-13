@@ -119,24 +119,24 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
             firm.workforce, t, output_per_worker, aug_cost_per_worker, params
         )
 
-        # F-03 T-10: Two-source firing UNION merge.
-        # The DP optimizer may have set firm._dp_optimizer_n_fire in the prior
-        # period's strategy call (Step 1). On non-DP strategies this attribute
-        # is absent (getattr returns 0) — the block is a no-op.
-        # UNION semantics (D-12): merged = threshold_set ∪ dp_set.
+        # Two-source firing UNION merge (D-03/D-12).
+        # Strategies write firm._fire_intent in the prior period's Step 1.
+        # (_dp_optimizer_n_fire is a @property delegating to _fire_intent.)
+        # On baseline strategies _fire_intent == 0 under T_review=inf (gate-nullified).
+        # UNION semantics: merged = threshold_set ∪ intent_set.
         # Consumer-side gate: _is_review_period(t, ...) — this IS the review period.
-        dp_n_fire = int(getattr(firm, "_dp_optimizer_n_fire", 0))
-        if dp_n_fire > 0 and _is_review_period(t, params.T_review):
+        fire_intent = int(getattr(firm, "_fire_intent", 0))
+        if fire_intent > 0 and _is_review_period(t, params.T_review):
             full_order = _sort_fireable_workers_by_cost_effectiveness(
                 firm, output_per_worker, firm.workforce.wage, t
             )
-            dp_fires = full_order[:dp_n_fire].astype(int)
+            intent_fires = full_order[:fire_intent].astype(int)
             # UNION: preserve deterministic order (ascending worker index via np.unique)
-            merged = np.unique(np.concatenate([fire_indices, dp_fires]))
+            merged = np.unique(np.concatenate([fire_indices, intent_fires]))
             fire_indices = merged.astype(int)
-        # Reset the optimizer hint: a non-DP strategy in the next period must not
-        # inherit a stale fire count. Happens AFTER the merge, BEFORE Step 1 below.
-        firm._dp_optimizer_n_fire = 0  # type: ignore[attr-defined]
+        # unconditional reset — wipes any strategy-written intent regardless of gate state;
+        # baseline strategies re-write every period; gate-nullified under T_review=inf.
+        firm._fire_intent = 0  # type: ignore[attr-defined]
 
         n_review_fired_period = int(len(fire_indices))
         period_review_fire_cost = float(params.c_fire) * n_review_fired_period
@@ -186,6 +186,13 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
             # Queue this period's firings for future hire-back
             if n_review_fired_period > 0:
                 firm.pending_hires.append((t + params.hire_delay_periods, n_review_fired_period))
+            # Step 0.5b: consume _hire_intent written by horizon strategies at Step 1 of prior period.
+            # One-period offset: written at t-1 Step 1, read+reset here at t Step 0.5b.
+            # Suppress when firing occurred this period (auto-replenish handles the queue).
+            hire_intent = int(getattr(firm, "_hire_intent", 0))
+            if hire_intent > 0 and n_review_fired_period == 0:
+                firm.pending_hires.append((t + params.hire_delay_periods, hire_intent))
+            firm._hire_intent = 0  # type: ignore[attr-defined]  # unconditional reset after read
             # Drain due backlog entries
             (
                 firm.workforce,
@@ -198,11 +205,10 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
         # -------------------------------------------------------------------
         # Step 1: strategy proposes new modes
         # -------------------------------------------------------------------
-        # MAJ-14 in-loop seam: expose output_per_worker to the DP optimizer's
-        # _forward_simulate via a firm attribute. Set every period (cheap no-op
-        # attribute write for non-DP strategies). The attribute is "live during
-        # a strategy call only" — the next period overwrites it.
+        # MAJ-14 in-loop seam: expose output/aug-cost history to forward-sim planners.
+        # Set every period; "live during a strategy call only" — the next period overwrites.
         firm._output_per_worker_so_far = output_per_worker  # type: ignore[attr-defined]
+        firm._aug_cost_per_worker_so_far = aug_cost_per_worker  # type: ignore[attr-defined]
         new_modes = strategy(firm, t)
 
         # Step 2: capture prev_modes AFTER strategy, BEFORE install

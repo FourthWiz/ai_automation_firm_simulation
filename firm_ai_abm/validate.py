@@ -104,15 +104,16 @@ UNSCALED_PARAMS: tuple[str, ...] = (
     # Alpha-dependent automation cost (unknown-alpha-cost-model): dimensionless ratios (D-01)
     # and belief sentinel (D-02). Monetary scaling comes through the w/tpw factor in cost_vec.
     # Phase 1.5 Stage X (augment-replenish-hiring): three new non-monetary fields.
-    # enable_replenish_hiring: boolean flag; max_hire_period: count; hire_delay_periods: count.
+    # enable_replenish_hiring: boolean flag; max_hire_period/max_hire_per_step: counts; hire_delay_periods: count.
     # beta-dist-task-attrs: four new non-monetary distribution-shape fields.
-    # Total: 9 SCALED + 29 UNSCALED = 38 FirmParams fields.
+    # Total: 9 SCALED + 30 UNSCALED = 39 FirmParams fields.
     "c_auto_alpha_slope",
     "c_auto_alpha_intercept",
     "belief_alpha",
     "enable_replenish_hiring",
     "max_hire_period",
     "hire_delay_periods",
+    "max_hire_per_step",
     "alpha_mean",
     "alpha_concentration",
     "beta_mean",
