@@ -394,6 +394,12 @@ def _forward_simulate(firm, t: int, path: list, horizon: int) -> float:
             )[:n_fire_step]
 
             f_workforce, _, _ = _apply_firings_on_workforce(f_workforce, fire_idx, t + s)
+            # MIN-2 planning approximation: charges c_fire * n_fire_step (DP's own
+            # selected count). The kernel charges c_fire * |threshold ∪ dp_set|;
+            # the UNION count >= n_fire_step, so forward-sim may undercount fire cost
+            # when the threshold rule also fires some of the same workers. Small
+            # magnitude; pursuing requires modeling threshold-rule selection in the
+            # forward sim (substantial complexity). Deferred per review MIN-2.
             path_pi -= params.c_fire * n_fire_step
 
         # Step 3: Apply mode change (promote top n_aug_step H tasks by beta_hat → A)
@@ -410,11 +416,20 @@ def _forward_simulate(firm, t: int, path: list, horizon: int) -> float:
             params=params,
             # theta_per_task omitted on purpose (None → ones; see D-13)
         )
+        # MIN-1 fix: assigned-workers-only wage bill (mirrors simulate.py:288-290 semantics).
+        # Forward-sim avoids task_to_worker_map because modes are not clamped after firings
+        # (K can shrink while f_modes still holds pre-fire H/A assignments), which would
+        # trigger task_to_worker_map's K=0/capacity assertions. Instead, derive the active
+        # worker count from H/A task count capped at current K — same result under the
+        # contiguous-slot assignment model, without the assertion risk.
+        _n_HA = int(((f_modes == int(Mode.H)) | (f_modes == int(Mode.A))).sum())
+        _K_active = min(_n_HA // params.tasks_per_worker, f_workforce.K)
+        _wage_f = float(f_workforce.wage[:_K_active].sum()) if _K_active > 0 else 0.0
         cost = (
             cost_vec(f_modes, alpha=alpha_hat, params=params).sum()
             # NB: cost_vec has no `beta` parameter — see MAJ-11 / D-06.
-            # f_K_extra accounts for pending-hire arrivals (K is read-only property).
-            + (f_workforce.K + f_K_extra) * params.w
+            # Pending-hire phantoms (f_K_extra) are not yet assigned tasks; flat rate.
+            + _wage_f + f_K_extra * params.w
             + params.F
         )
         # adj_cost — pass workforce=None per CRIT-1 (no a_trained mutation on live firm)
