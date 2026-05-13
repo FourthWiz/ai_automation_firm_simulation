@@ -1,8 +1,8 @@
 """Rolling-horizon DP optimizer for FirmBehavior (F-03).
 
-Implements a 3-step rolling horizon DP over a 5×5 (fire%, aug%) action grid.
-Worst-case path count: 25^3 = 15,625 (all 3 steps are review periods).
-Typical dashboard (T_review=5, horizon=3): 125–625 paths per call.
+Implements a rolling horizon DP over a 5×5 (fire%, aug%) action grid.
+Max lookahead depth: 5 steps. Worst-case path count: 25^5 = 9,765,625 (all 5
+steps are review periods); typical dashboard (T_review=5, horizon=3): 125–625.
 
 Posteriors are run-state: alpha_hat[i] and beta_hat[i] are updated in-place
 as tasks are observed running in modes T and A respectively. They are cleared
@@ -38,7 +38,7 @@ from firm_ai_abm.adjustment import adj_cost
 # Module-level constants (single source of truth)
 # ---------------------------------------------------------------------------
 
-_DP_HORIZON_MAX: int = 3
+_DP_HORIZON_MAX: int = 5
 """Hard cap on lookahead depth (D-03). UI margin_horizon slider is clamped to this."""
 
 _DP_GRID_LEVELS: tuple = (0.0, 0.25, 0.5, 0.75, 1.0)
