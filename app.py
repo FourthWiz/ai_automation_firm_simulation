@@ -1,7 +1,7 @@
 """Phase 1.5 FirmBehavior Streamlit dashboard.
 
 Single-page app that imports the simulation kernel directly and renders
-13 Plotly charts across 5 tabs with primary controls in the main panel.
+15 Plotly charts across 5 tabs with primary controls in the main panel.
 
 Architecture notes:
 - @st.cache_data keyed on a 35-tuple of scalars (D-01): avoids passing
@@ -83,7 +83,6 @@ _STRATEGY_REGISTRY = {
     "all_H": all_H,
     "all_A": all_A,
     "all_T": all_T,
-    "greedy_profit": greedy_profit,
     "greedy_with_switching": greedy_with_switching,
     "horizon_optimizer": target_margin_strategy,
 }
@@ -249,7 +248,7 @@ def _build_controls() -> tuple:
     """
     # ------------------------------------------------------------------
     # Row A: strategy radio | T | N
-    # Single unified strategy chooser with all 6 options. Default = greedy_profit (index 3).
+    # Single unified strategy chooser with all 5 options. Default = horizon_optimizer (resolved by name).
     # ------------------------------------------------------------------
     col_a1, col_a2, col_a3 = st.columns([2, 1, 1])
 
@@ -257,7 +256,7 @@ def _build_controls() -> tuple:
         strategy = st.radio(
             "Strategy",
             list(_STRATEGY_REGISTRY.keys()),
-            index=3,  # greedy_profit
+            index=list(_STRATEGY_REGISTRY.keys()).index("horizon_optimizer"),  # Default = horizon_optimizer (resolved by name)
             key="strategy",
             horizontal=True,
         )
@@ -742,7 +741,7 @@ def main() -> None:
 
     with tab_het:
         if active_key[_SIGMA_THETA_IDX] == 0.0:
-            # sigma_theta=0 → render charts with empty/degenerate inputs to preserve 13-plot count
+            # sigma_theta=0 → render charts with empty/degenerate inputs to preserve 15-plot count
             st.plotly_chart(fig_theta_histogram(np.array([])), width="stretch", key="fig_theta_hist")
             st.plotly_chart(fig_mean_theta_over_time(df), width="stretch", key="fig_mean_theta")
         else:

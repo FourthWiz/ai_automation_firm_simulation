@@ -132,7 +132,7 @@ def test_tab_het_sigma_theta_zero_renders():
     """P1-11.14: tab_het with sigma_theta=0 still renders 2 charts (degenerate inputs).
 
     P1-6 chose option (b): render both charts with empty inputs when sigma_theta=0.
-    This preserves the 13-plot count regardless of sigma_theta value.
+    This preserves the 15-plot count (post F-02: alpha + beta histograms add 2) regardless of sigma_theta value.
     """
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_file("app.py", default_timeout=60).run()
@@ -145,10 +145,10 @@ def test_tab_het_sigma_theta_zero_renders():
     run_btn = _find_run_btn(at)
     at = run_btn.click().run()
     assert not at.exception
-    # Plot count should still be 13 (degenerate empty charts)
+    # Plot count should still be 15 (degenerate empty charts; post F-02: alpha + beta histograms add 2)
     unknown_count = sum(1 for el in at.main if type(el).__name__ == "UnknownElement")
-    assert unknown_count == 13, (
-        f"Expected 13 UnknownElements with sigma_theta=0, got {unknown_count}"
+    assert unknown_count == 15, (
+        f"Expected 15 UnknownElements with sigma_theta=0, got {unknown_count}"
     )
 
 
