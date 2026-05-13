@@ -66,6 +66,15 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+PLAUSIBLE_DOMAIN = ""  # Set to live domain at deploy time (e.g. "firm-behavior.streamlit.app")
+# Plausible is cookieless and GDPR-friendly; tracks page-view count and country only.
+if PLAUSIBLE_DOMAIN:
+    st.markdown(
+        f'<script defer data-domain="{PLAUSIBLE_DOMAIN}" '
+        f'src="https://plausible.io/js/script.js"></script>',
+        unsafe_allow_html=True,
+    )
+
 # ---------------------------------------------------------------------------
 # T-04: Strategy registry and params key helpers
 # ---------------------------------------------------------------------------
@@ -128,15 +137,19 @@ def params_to_key(params: FirmParams, seed: int) -> tuple:
 
 
 # All widget key strings used in _build_controls — for Reset button
+# Net delta from prior version: +strategy, +strategy_adv, +hiring_mode, -enable_hiring,
+# -enable_replenish_hiring → net +1; final count = 32.
 ALL_WIDGET_KEYS = (
-    "scenario", "N", "seed",
+    "strategy", "strategy_adv",
+    "N", "T", "seed",
     "q_a", "g", "c_auto", "w", "p", "target_margin",
-    "T", "tasks_per_worker",
+    "scenario",
+    "tasks_per_worker",
     "q_h", "c_aug", "c_fire", "c_hire", "c_train", "F",
     "n_amortize", "margin_horizon",
     "sigma_theta", "theta_min", "theta_max", "corr_w_theta", "sigma_w",
     "T_review", "firing_threshold",
-    "enable_hiring", "enable_replenish_hiring",
+    "hiring_mode",
     "hire_delay_periods", "max_hire_period",
     "enable_training_delay",
 )
@@ -214,32 +227,39 @@ def _build_controls() -> tuple:
     Primary controls are rendered inline (called before the run button).
     Advanced controls are inside an expander below the primary bar.
 
+    Layout:
+      Row A: strategy (non-adv radio) | T | N
+      Row B: q_a | g | c_auto | w
+      Row C: tasks_per_worker | T_review | hire_delay_periods | max_hire_period
+      Hiring policy radio (D-01 mutex)
+      Advanced expander (6 tabs):
+        Costs | Strategy & pricing | Worker heterogeneity |
+        Firing (advanced) | Productivity baseline | Reproducibility
+
     Returns:
         (strategy_name: str, params_key: tuple[31 scalars], draft_params: FirmParams)
     """
     # ------------------------------------------------------------------
-    # Row A: scenario | strategy | N | seed
+    # Row A: strategy radio (simple) | T | N
+    # D-02: non-advanced shows greedy_profit / greedy_with_switching only
     # ------------------------------------------------------------------
-    col_a1, col_a2, col_a3, col_a4 = st.columns([1, 1, 1, 1])
+    col_a1, col_a2, col_a3 = st.columns([2, 1, 1])
 
     with col_a1:
-        scenario = st.radio(
-            "Scenario",
-            ["price", "margin"],
+        strategy = st.radio(
+            "Strategy",
+            ["greedy_profit", "greedy_with_switching"],
             index=0,
-            key="scenario",
+            key="strategy",
+            horizontal=True,
         )
 
     with col_a2:
-        if scenario == "margin":
-            st.markdown("**Strategy:** target_margin *(auto)*")
-            strategy = "target_margin"
-        else:
-            strategy = st.radio(
-                "Strategy",
-                [k for k in _STRATEGY_REGISTRY if k != "target_margin"],
-                index=3,
-            )
+        T = st.number_input(
+            "T", min_value=1, max_value=200,
+            value=FirmParams().T, step=10,
+            help="Simulation periods", key="T",
+        )
 
     with col_a3:
         N = st.number_input(
@@ -249,14 +269,6 @@ def _build_controls() -> tuple:
             step=10,
             help="Number of tasks per firm (FirmParams default: 100)",
             key="N",
-        )
-
-    with col_a4:
-        seed = st.number_input(
-            "Seed (random)",
-            min_value=0, value=0, step=1,
-            help="seed=0 default; change to vary worker draws.",
-            key="seed",
         )
 
     # ------------------------------------------------------------------
@@ -297,55 +309,76 @@ def _build_controls() -> tuple:
         )
 
     # ------------------------------------------------------------------
-    # Row C: p (price mode) or target_margin (margin mode)
-    # Both widgets are always rendered (disabled when inactive) to keep
-    # widget keys stable across scenario switches.
+    # Row C: tasks_per_worker | T_review | hire_delay_periods | max_hire_period
+    # D-04: reclaimed from p/target_margin (moved to Advanced).
+    # NOTE: tasks_per_worker is defined here BEFORE the Advanced expander so
+    # that firing_threshold_kernel conversion inside the expander can use it (R-01).
     # ------------------------------------------------------------------
-    row_c1, row_c2 = st.columns(2)
-    with row_c1:
-        p = st.slider(
-            "Output price (p)",
-            0.1, 2.0, float(FirmParams().p), 0.05,
-            help="Output price (inactive in margin scenario)",
-            key="p",
-            disabled=(scenario == "margin"),
+    # D-01: hiring_mode radio must also be defined before Row C so that
+    # hire_delay_periods and max_hire_period disabled-state can reference it.
+    # Render hiring_mode first, then row C.
+
+    hiring_mode = st.radio(
+        "Hiring policy",
+        options=["off", "enable_hiring", "enable_replenish_hiring"],
+        index=0,
+        key="hiring_mode",
+        horizontal=True,
+        help="off = no hiring after firing; enable_hiring = immediate refill to K*; "
+             "enable_replenish_hiring = delayed backlog refill (mutually exclusive)",
+    )
+
+    col_c1, col_c2, col_c3, col_c4 = st.columns([1, 1, 1, 1])
+
+    with col_c1:
+        tasks_per_worker = st.number_input(
+            "Tasks per worker", min_value=1, max_value=100,
+            value=FirmParams().tasks_per_worker, step=1,
+            help="K_workforce = N / tasks_per_worker", key="tasks_per_worker",
         )
-    with row_c2:
-        target_margin_val = st.slider(
-            "Target margin (target_margin)",
-            0.0, 0.5, float(FirmParams().target_margin), 0.01,
-            help="Target (revenue − cost) / revenue for the margin-optimizer strategy",
-            key="target_margin",
-            disabled=(scenario == "price"),
+
+    with col_c2:
+        T_REVIEW_OPTIONS = [5, 10, 20, 30, "inf"]
+        T_review_choice = st.select_slider(
+            "T_review", options=T_REVIEW_OPTIONS,
+            value=5,  # UI default 5 differs from FirmParams().T_review = math.inf (two-defaults seam)
+            help="Periodic firing review interval ('inf' = disabled)", key="T_review",
+        )
+        T_review_value = math.inf if T_review_choice == "inf" else float(T_review_choice)
+
+    with col_c3:
+        hire_delay_periods_val = st.number_input(
+            "hire_delay_periods", min_value=1, max_value=20,
+            value=1, step=1, key="hire_delay_periods",
+            help="Periods to wait before hiring back fired workers. Active only when enable_replenish_hiring=True.",
+            disabled=(hiring_mode != "enable_replenish_hiring"),
+        )
+
+    with col_c4:
+        max_hire_period_val = st.number_input(
+            "max_hire_period", min_value=0, max_value=200,
+            # UI default 5 diverges from kernel sentinel 0 (drain entire backlog); user confirmed
+            value=5, step=1, key="max_hire_period",
+            help="Per-period hire cap from backlog. 0 = drain entire backlog in one period.",
+            disabled=(hiring_mode == "off"),
         )
 
     # ------------------------------------------------------------------
-    # Advanced expander: 24 remaining controls
+    # Advanced expander: 6 tabs
+    # D-05: new tab list — Run length and Firing & hiring tabs replaced
     # ------------------------------------------------------------------
     with st.expander("Advanced parameters", expanded=False):
         adv_tabs = st.tabs([
-            "Run length",
             "Costs",
-            "Strategy meta",
+            "Strategy & pricing",
             "Worker heterogeneity",
-            "Firing & hiring",
+            "Firing (advanced)",
             "Productivity baseline",
+            "Reproducibility",
         ])
 
-        # Run length
+        # Costs (unchanged)
         with adv_tabs[0]:
-            T = st.number_input(
-                "T", min_value=1, max_value=200, value=FirmParams().T, step=10,
-                help="Simulation periods", key="T",
-            )
-            tasks_per_worker = st.number_input(
-                "tasks_per_worker", min_value=1, max_value=100,
-                value=FirmParams().tasks_per_worker, step=1,
-                help="K_workforce = N / tasks_per_worker", key="tasks_per_worker",
-            )
-
-        # Costs
-        with adv_tabs[1]:
             c_aug = st.slider("c_aug", 0.0, 1.0, float(FirmParams().c_aug), 0.01,
                               help="Augmentation cost per task", key="c_aug")
             c_fire = st.slider("c_fire", 0.0, 10.0, float(FirmParams().c_fire), 0.1,
@@ -357,8 +390,32 @@ def _build_controls() -> tuple:
             F = st.slider("F", 0.0, 20.0, float(FirmParams().F), 0.5,
                           help="Fixed overhead cost per period", key="F")
 
-        # Strategy meta
-        with adv_tabs[2]:
+        # Strategy & pricing (D-02: scenario + strategy_adv + p + target_margin + meta)
+        with adv_tabs[1]:
+            scenario = st.radio("Scenario", ["price", "margin"], index=0, key="scenario")
+            if scenario == "margin":
+                st.markdown("**Strategy:** target_margin *(auto)*")
+                strategy_adv = "target_margin"
+            else:
+                strategy_adv = st.radio(
+                    "Strategy (override)",
+                    list(_STRATEGY_REGISTRY.keys()),
+                    index=3,  # greedy_profit
+                    key="strategy_adv",
+                )
+            p = st.slider(
+                "Output price (p)", 0.1, 2.0, float(FirmParams().p), 0.05,
+                help="Output price (inactive in margin scenario)",
+                key="p",
+                disabled=(scenario == "margin"),
+            )
+            target_margin_val = st.slider(
+                "Target margin (target_margin)",
+                0.0, 0.5, float(FirmParams().target_margin), 0.01,
+                help="Target (revenue − cost) / revenue for the margin-optimizer strategy",
+                key="target_margin",
+                disabled=(scenario == "price"),
+            )
             n_amortize = st.number_input(
                 "n_amortize", min_value=1, max_value=24,
                 value=FirmParams().n_amortize, step=1,
@@ -371,8 +428,8 @@ def _build_controls() -> tuple:
                 key="margin_horizon",
             )
 
-        # Worker heterogeneity
-        with adv_tabs[3]:
+        # Worker heterogeneity (unchanged)
+        with adv_tabs[2]:
             sigma_theta = st.slider(
                 "sigma_theta", 0.0, 0.5, float(FirmParams().sigma_theta), 0.01,
                 help="Std dev of theta (worker skill)", key="sigma_theta",
@@ -394,14 +451,8 @@ def _build_controls() -> tuple:
                 help="Wage noise std dev", key="sigma_w",
             )
 
-        # Firing & hiring
-        with adv_tabs[4]:
-            T_REVIEW_OPTIONS = ["inf", 5, 10, 20, 30]
-            T_review_choice = st.select_slider(
-                "T_review", options=T_REVIEW_OPTIONS, value="inf",
-                help="Review period (inf = disabled)", key="T_review",
-            )
-            T_review_value = math.inf if T_review_choice == "inf" else float(T_review_choice)
+        # Firing (advanced): only firing_threshold remains; T_review/hiring moved to non-adv
+        with adv_tabs[3]:
             # firing_threshold_ui is in per-task-output units.
             # UI range [-1.0, 1.0] maps to kernel range [-tpw, tpw].
             firing_threshold_ui = st.slider(
@@ -413,50 +464,51 @@ def _build_controls() -> tuple:
                 ),
                 key="firing_threshold",
             )
-            # Convert UI (per-task) → kernel (per-worker) by multiplying by tasks_per_worker
+            # Convert UI (per-task) → kernel (per-worker) by multiplying by tasks_per_worker.
+            # tasks_per_worker is defined in non-advanced Row C above (R-01 ordering).
             firing_threshold_kernel = float(firing_threshold_ui) * int(tasks_per_worker)
 
-            enable_hiring_val = st.checkbox(
-                "enable_hiring",
-                value=False,
-                help="When enabled, fired workers are immediately rehired toward K*. c_hire is charged per hire.",
-                key="enable_hiring",
-            )
-            enable_replenish_hiring_val = st.checkbox(
-                "enable_replenish_hiring",
-                value=False,
-                help="Augmentation-targeted backlog hiring. Mutually exclusive with enable_hiring.",
-                key="enable_replenish_hiring",
-            )
-            if enable_hiring_val and enable_replenish_hiring_val:
-                st.warning("enable_hiring and enable_replenish_hiring are mutually exclusive — disable one.", icon="⚠️")
-            hire_delay_periods_val = st.number_input(
-                "hire_delay_periods", min_value=1, max_value=20,
-                value=FirmParams().hire_delay_periods, step=1,
-                help="Periods to wait before hiring back fired workers. Active only when enable_replenish_hiring=True.",
-                key="hire_delay_periods",
-                disabled=not enable_replenish_hiring_val,
-            )
-            max_hire_period_val = st.number_input(
-                "max_hire_period", min_value=0, max_value=200,
-                value=FirmParams().max_hire_period, step=1,
-                help="Per-period hire cap from backlog. 0 = drain entire backlog in one period.",
-                key="max_hire_period",
-            )
-
-        # Productivity baseline
-        with adv_tabs[5]:
+        # Productivity baseline (unchanged)
+        with adv_tabs[4]:
             q_h = st.slider(
                 "q_h", 0.0, 3.0, float(FirmParams().q_h), 0.05,
                 help="Human productivity per task", key="q_h",
             )
-            # Training
             enable_training_delay_val = st.checkbox(
                 "enable_training_delay",
                 value=True,
                 help="When enabled, H→A workers produce at H-rate for 1 period before augmentation kicks in.",
                 key="enable_training_delay",
             )
+
+        # Reproducibility (D-03: seed moved here from non-advanced)
+        with adv_tabs[5]:
+            seed = st.number_input(
+                "Seed (random)",
+                min_value=0, value=0, step=1,
+                help="seed=0 default; change to vary worker draws.",
+                key="seed",
+            )
+
+    # ------------------------------------------------------------------
+    # D-01: inline UI→kernel mapping for hiring_mode radio
+    # ------------------------------------------------------------------
+    enable_hiring_val = (hiring_mode == "enable_hiring")
+    enable_replenish_hiring_val = (hiring_mode == "enable_replenish_hiring")
+
+    # ------------------------------------------------------------------
+    # D-02: merge active_strategy from both radios
+    # Rule: scenario=margin → target_margin always.
+    #       Advanced radio != default ("greedy_profit") → advanced wins.
+    #       Otherwise non-advanced radio wins.
+    # ------------------------------------------------------------------
+    _ADV_DEFAULT = "greedy_profit"
+    if scenario == "margin":
+        active_strategy = "target_margin"
+    elif strategy_adv != _ADV_DEFAULT:
+        active_strategy = strategy_adv
+    else:
+        active_strategy = strategy  # non-advanced wins when advanced is at default
 
     # ------------------------------------------------------------------
     # Build FirmParams and cache key
@@ -495,7 +547,17 @@ def _build_controls() -> tuple:
         seed=int(seed),
     )
     key = params_to_key(draft_params, int(seed))
-    return strategy, key, draft_params
+
+    # load-bearing for tests: AppTest reads DRAFT_PARAMS_DEBUG to verify inline UI→kernel mapping
+    # do NOT remove — removing breaks test_replenish_hiring_toggle_changes_cache_key
+    #                                  and test_hiring_mode_mutex_kernel_mapping
+    st.session_state["DRAFT_PARAMS_DEBUG"] = draft_params
+
+    # load-bearing for tests: AppTest reads LAST_STRATEGY_DEBUG to verify merge function
+    # do NOT remove — removing breaks test_strategy_merge_function
+    st.session_state["LAST_STRATEGY_DEBUG"] = active_strategy
+
+    return active_strategy, key, draft_params
 
 
 # ---------------------------------------------------------------------------

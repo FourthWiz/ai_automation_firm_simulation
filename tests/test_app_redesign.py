@@ -65,6 +65,8 @@ def test_tabs_present():
 
     Note: at.tabs returns ALL tabs including the 6 advanced-expander tabs
     (total 11). The plot tabs are always the last 5 in render order.
+    Advanced tabs (D-05): Costs | Strategy & pricing | Worker heterogeneity |
+                          Firing (advanced) | Productivity baseline | Reproducibility
     """
     at = _get_at()
     assert not at.exception
@@ -73,6 +75,16 @@ def test_tabs_present():
     expected_all_count = 11
     assert len(all_tabs) == expected_all_count, (
         f"Expected {expected_all_count} total tabs, got {len(all_tabs)}: {[t.label for t in all_tabs]}"
+    )
+    # Advanced tabs are the first 6
+    advanced_tabs = all_tabs[:6]
+    expected_advanced_labels = [
+        "Costs", "Strategy & pricing", "Worker heterogeneity",
+        "Firing (advanced)", "Productivity baseline", "Reproducibility",
+    ]
+    actual_advanced_labels = [t.label for t in advanced_tabs]
+    assert actual_advanced_labels == expected_advanced_labels, (
+        f"Advanced tab labels mismatch. Expected {expected_advanced_labels}, got {actual_advanced_labels}"
     )
     # Plot tabs are the last 5
     plot_tabs = all_tabs[-5:]
@@ -84,7 +96,17 @@ def test_tabs_present():
 
 
 def test_widget_keys_preserved():
-    """P1-11.14: All widget keys from the frozen contract are present on the page."""
+    """P1-11.14: All widget keys from the frozen contract are present on the page.
+
+    Assumes default scenario='price'; `strategy_adv` radio is only present in
+    at.radio under the price scenario — when scenario='margin', it is replaced
+    by a static st.markdown and does not appear in at.radio.
+
+    NOTE: relies on AppTest including disabled widgets in at.number_input/at.slider/
+    at.radio collections (verified via the existing disabled p/target_margin pattern).
+    If a future Streamlit upgrade excludes disabled widgets from these collections,
+    this test will need to enable each disabled widget before assertion.
+    """
     from app import ALL_WIDGET_KEYS
     at = _get_at()
     assert not at.exception
@@ -199,9 +221,125 @@ def test_reset_button_restores_defaults():
         f"sigma_theta not restored: got {sigma_after.value}, expected {defaults.sigma_theta}"
     )
 
-    # Also check T_review select_slider (widget speaks string "inf")
+    # Also check T_review select_slider (UI default 5, NOT "inf" — two-defaults seam: D-04)
     t_review_after = next((s for s in at.select_slider if s.key == "T_review"), None)
     assert t_review_after is not None
-    assert t_review_after.value == "inf", (
-        f"T_review not restored: got {t_review_after.value}, expected 'inf'"
+    assert t_review_after.value == 5, (
+        f"T_review not restored: got {t_review_after.value}, expected 5 (UI default; "
+        "kernel default is math.inf — deliberately diverges per D-04 two-defaults seam)"
+    )
+
+    # Also check max_hire_period (UI default 5, NOT kernel sentinel 0 — confirmed R-09)
+    max_hire_after = next((inp for inp in at.number_input if inp.key == "max_hire_period"), None)
+    assert max_hire_after is not None
+    assert int(max_hire_after.value) == 5, (
+        f"max_hire_period not restored: got {max_hire_after.value}, expected 5 "
+        "(UI default 5 diverges from kernel sentinel 0; user confirmed per R-09)"
+    )
+
+    # Also check tasks_per_worker (UI default == FirmParams default, no divergence)
+    tasks_per_worker_after = next((inp for inp in at.number_input if inp.key == "tasks_per_worker"), None)
+    assert tasks_per_worker_after is not None
+    assert int(tasks_per_worker_after.value) == int(defaults.tasks_per_worker), (
+        f"tasks_per_worker not restored: got {tasks_per_worker_after.value}, "
+        f"expected {defaults.tasks_per_worker}"
+    )
+
+
+def test_hiring_mode_mutex_kernel_mapping():
+    """D-01: Verify _build_controls inline mapping via DRAFT_PARAMS_DEBUG for all three radio options.
+
+    A swap bug in _build_controls (assigning enable_hiring_val = (hiring_mode == "enable_replenish_hiring"))
+    would fail the enable_hiring assertion for mode="enable_hiring".
+    """
+    from streamlit.testing.v1 import AppTest
+    from app import params_to_key
+
+    at = AppTest.from_file("app.py", default_timeout=30).run()
+    expected = {
+        "off": (False, False),
+        "enable_hiring": (True, False),
+        "enable_replenish_hiring": (False, True),
+    }
+    for mode, (exp_hiring, exp_replenish) in expected.items():
+        at.radio(key="hiring_mode").set_value(mode).run()
+        dp = at.session_state["DRAFT_PARAMS_DEBUG"]
+        assert dp.enable_hiring is exp_hiring, (
+            f"mode={mode}: enable_hiring should be {exp_hiring}, got {dp.enable_hiring}"
+        )
+        assert dp.enable_replenish_hiring is exp_replenish, (
+            f"mode={mode}: enable_replenish_hiring should be {exp_replenish}, got {dp.enable_replenish_hiring}"
+        )
+        key = params_to_key(dp, 0)
+        assert (key[26], key[27]) == (exp_hiring, exp_replenish), (
+            f"mode={mode}: key tuple positions mismatch — both-True is unreachable"
+        )
+
+
+def test_plausible_noop_when_placeholder_unset():
+    """D-07: With PLAUSIBLE_DOMAIN == '' (placeholder unchanged), st.markdown must NOT emit script tag."""
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file("app.py", default_timeout=30).run()
+    script_tags = [m for m in at.markdown if "plausible.io/js/script.js" in str(m.value)]
+    assert len(script_tags) == 0, (
+        f"Plausible script tag emitted with empty domain. Found: {script_tags}"
+    )
+
+
+def test_strategy_radio_persists_across_expander_toggle():
+    """D-02: strategy_adv value persists across re-renders (Streamlit key-based session_state).
+
+    AppTest .run() simulates a full Streamlit rerun, equivalent to expander open/close
+    from a widget-state persistence perspective.
+    """
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file("app.py", default_timeout=60).run()
+    # Set strategy_adv to a non-default value
+    at.radio(key="strategy_adv").set_value("all_T").run()
+    # Interact with another widget to simulate re-render
+    at.number_input(key="N").set_value(150).run()
+    # Verify strategy_adv value persisted
+    radios = {r.key: r for r in at.radio}
+    assert radios["strategy_adv"].value == "all_T", (
+        f"strategy_adv should persist across re-render, got {radios['strategy_adv'].value}"
+    )
+
+
+def test_strategy_merge_function():
+    """D-02: Verify four merge cases via LAST_STRATEGY_DEBUG session_state key.
+
+    Case 1: advanced=default, non-advanced=greedy_profit → greedy_profit
+    Case 2: advanced=default, non-advanced=greedy_with_switching → greedy_with_switching
+    Case 3: advanced=all_T (non-default) → all_T wins regardless of non-advanced
+    Case 4: scenario=margin → target_margin always
+    """
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file("app.py", default_timeout=30).run()
+
+    # Case 1: advanced=default (greedy_profit), non-advanced=greedy_profit → greedy_profit
+    at.radio(key="strategy_adv").set_value("greedy_profit").run()
+    at.radio(key="strategy").set_value("greedy_profit").run()
+    assert at.session_state["LAST_STRATEGY_DEBUG"] == "greedy_profit", (
+        f"Case 1 failed: expected greedy_profit, got {at.session_state['LAST_STRATEGY_DEBUG']}"
+    )
+
+    # Case 2: advanced=default, non-advanced=greedy_with_switching → greedy_with_switching
+    at.radio(key="strategy").set_value("greedy_with_switching").run()
+    assert at.session_state["LAST_STRATEGY_DEBUG"] == "greedy_with_switching", (
+        f"Case 2 failed: expected greedy_with_switching, got {at.session_state['LAST_STRATEGY_DEBUG']}"
+    )
+
+    # Case 3: advanced=all_T (non-default), non-advanced=anything → all_T
+    at.radio(key="strategy_adv").set_value("all_T").run()
+    assert at.session_state["LAST_STRATEGY_DEBUG"] == "all_T", (
+        f"Case 3 failed: expected all_T, got {at.session_state['LAST_STRATEGY_DEBUG']}"
+    )
+
+    # Case 4: scenario=margin → target_margin always
+    at.radio(key="scenario").set_value("margin").run()
+    assert at.session_state["LAST_STRATEGY_DEBUG"] == "target_margin", (
+        f"Case 4 failed: expected target_margin, got {at.session_state['LAST_STRATEGY_DEBUG']}"
     )

@@ -66,52 +66,67 @@ def test_cache_key_length():
     assert key[-1] == 0, f"key[-1] should be seed=0, got {key[-1]}"
 
 
-def test_enable_hiring_checkbox_defaults_false():
-    """T-12: enable_hiring checkbox defaults to False (dormant/opt-in semantics)."""
+def test_hiring_mode_radio_defaults_off():
+    """D-01: hiring_mode radio replaces two checkboxes; defaults to 'off'."""
     try:
         from streamlit.testing.v1 import AppTest
     except ImportError:
         pytest.skip("streamlit AppTest not available")
 
-    at = AppTest.from_file("app.py", default_timeout=30)
-    at.run()
-
-    checkboxes = {cb.key: cb for cb in at.checkbox}
-    assert "enable_hiring" in checkboxes, (
-        "enable_hiring checkbox not found in sidebar. "
-        f"Available checkboxes: {list(checkboxes.keys())}"
+    at = AppTest.from_file("app.py", default_timeout=30).run()
+    radios = {r.key: r for r in at.radio}
+    assert "hiring_mode" in radios, (
+        f"hiring_mode radio not found. Available radio keys: {list(radios.keys())}"
     )
-    assert checkboxes["enable_hiring"].value is False, (
-        "enable_hiring checkbox should default to False (opt-in per D-02)."
+    assert radios["hiring_mode"].value == "off", (
+        f"hiring_mode should default to 'off', got {radios['hiring_mode'].value}"
     )
 
 
 def test_replenish_hiring_toggle_changes_cache_key():
-    """T-16: toggling enable_replenish_hiring changes params_key[27] from False to True."""
+    """D-01: toggling hiring_mode to enable_replenish_hiring maps correctly via DRAFT_PARAMS_DEBUG.
+
+    5-step approach: radio toggle → DRAFT_PARAMS_DEBUG read (inline mapping) → tuple-position check.
+    A typo swapping enable_hiring_val and enable_replenish_hiring_val in _build_controls
+    would produce dp_after.enable_hiring is True and fail Step 4.
+    """
     try:
         from streamlit.testing.v1 import AppTest
     except ImportError:
         pytest.skip("streamlit AppTest not available")
 
-    at = AppTest.from_file("app.py", default_timeout=30)
-    at.run()
+    at = AppTest.from_file("app.py", default_timeout=30).run()
 
-    # Default state: enable_replenish_hiring=False → params_key[27] == False
-    checkboxes = {cb.key: cb for cb in at.checkbox}
-    assert "enable_replenish_hiring" in checkboxes, (
-        f"enable_replenish_hiring checkbox not found. Keys: {list(checkboxes.keys())}"
+    # Step 1: assert default radio state
+    radios = {r.key: r for r in at.radio}
+    assert "hiring_mode" in radios, (
+        f"hiring_mode radio not found. Keys: {list(radios.keys())}"
     )
-    assert checkboxes["enable_replenish_hiring"].value is False, (
-        "enable_replenish_hiring should default to False"
+    assert radios["hiring_mode"].value == "off"
+
+    # Step 2: read default DRAFT_PARAMS_DEBUG — inline mapping yields both False
+    dp_default = at.session_state["DRAFT_PARAMS_DEBUG"]
+    assert dp_default.enable_hiring is False, (
+        f"default enable_hiring should be False, got {dp_default.enable_hiring}"
+    )
+    assert dp_default.enable_replenish_hiring is False, (
+        f"default enable_replenish_hiring should be False, got {dp_default.enable_replenish_hiring}"
     )
 
-    # Toggle enable_replenish_hiring to True and re-run
-    at.checkbox(key="enable_replenish_hiring").set_value(True).run()
+    # Step 3: toggle to enable_replenish_hiring and re-run
+    at.radio(key="hiring_mode").set_value("enable_replenish_hiring").run()
 
-    # Rebuild key from sidebar state — params_key[27] should now be True
-    # (verifies values flow through draft_params to the cache key)
-    from app import _PARAM_FIELDS, params_to_key
-    from firm_ai_abm.config import FirmParams
-    p_toggled = FirmParams(enable_replenish_hiring=True)
-    key_toggled = params_to_key(p_toggled, 0)
-    assert key_toggled[27] is True, f"params_key[27] should be True after toggle, got {key_toggled[27]}"
+    # Step 4: read post-toggle DRAFT_PARAMS_DEBUG — verifies _build_controls inline mapping
+    dp_after = at.session_state["DRAFT_PARAMS_DEBUG"]
+    assert dp_after.enable_hiring is False, (
+        f"post-toggle enable_hiring should be False, got {dp_after.enable_hiring}"
+    )
+    assert dp_after.enable_replenish_hiring is True, (
+        f"post-toggle enable_replenish_hiring should be True, got {dp_after.enable_replenish_hiring}"
+    )
+
+    # Step 5: verify tuple position invariant via params_to_key
+    from app import params_to_key
+    key_after = params_to_key(dp_after, 0)
+    assert key_after[26] is False, f"key[26] (enable_hiring) should be False, got {key_after[26]}"
+    assert key_after[27] is True, f"key[27] (enable_replenish_hiring) should be True, got {key_after[27]}"
