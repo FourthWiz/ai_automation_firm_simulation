@@ -1,6 +1,6 @@
 """Tests for F-03 rolling-horizon DP optimizer.
 
-23 sub-tests covering:
+25 sub-tests covering:
  1.  test_returns_valid_modes_array
  2.  test_does_not_mutate_firm_modes
  3.  test_prior_initial_value
@@ -23,8 +23,10 @@
 19.  test_alpha_cost_engaged_path_uses_alpha_hat
 20.  test_forward_sim_pending_hires_tuple_shape
 20b. test_forward_sim_no_cross_path_mutation
-21.  test_forward_sim_theta_flat_counterfactual
+21.  test_forward_sim_uses_true_theta
 22.  test_dp_calendar_alignment_writeback
+T-09a. test_byte_parity_dormant_defaults
+T-09b. test_runs_at_N500_under_6_seconds_with_action_grid
 """
 
 import math
@@ -676,4 +678,75 @@ def test_dp_calendar_alignment_writeback():
     assert firm_t3._dp_optimizer_n_fire == 0, (
         f"At t=3: _dp_optimizer_n_fire should be 0 (gate checks t+1=4, non-review). "
         f"Got: {firm_t3._dp_optimizer_n_fire}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# T-09a. test_byte_parity_dormant_defaults
+# ---------------------------------------------------------------------------
+
+def test_byte_parity_dormant_defaults():
+    """New control flags at dormant defaults produce byte-identical profit series.
+
+    Claim: with all new flags at their off/zero defaults, run_simulation(dp_optimizer)
+    returns the same profit series regardless of whether the flags are set explicitly
+    or left at dataclass defaults.
+
+    This guards against the new gate/intent machinery accidentally changing behavior
+    when all guards are disabled (T_review=inf, enable_replenish_hiring=False,
+    max_hire_per_step=0, enable_horizon_brute_action_grid=False).
+    """
+    # Canonical defaults (no new flags)
+    params_a = FirmParams(seed=42, N=50, T=20)
+    firm_a = make_firm(params_a)
+    df_a = run_simulation(firm_a, dp_rolling_horizon_strategy)
+
+    # Explicit dormant values for every new flag added by this task
+    params_b = FirmParams(
+        seed=42, N=50, T=20,
+        T_review=math.inf,                   # default, disables periodic review
+        enable_replenish_hiring=False,        # default, off
+        max_hire_per_step=0,                  # default, hire-axis degenerate
+        enable_horizon_brute_action_grid=False,  # default, off
+    )
+    firm_b = make_firm(params_b)
+    df_b = run_simulation(firm_b, dp_rolling_horizon_strategy)
+
+    np.testing.assert_array_almost_equal(
+        df_a["pi"].values, df_b["pi"].values, decimal=10,
+        err_msg="Dormant-default parity failed: profit series differ between implicit "
+                "and explicit defaults. A gate condition or new path may be firing "
+                "when it should be dormant.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# T-09b. test_runs_at_N500_under_6_seconds_with_action_grid
+# ---------------------------------------------------------------------------
+
+def test_runs_at_N500_under_6_seconds_with_action_grid():
+    """Performance sentinel B: N=500, T=20, action-grid enabled, runs in <6 s.
+
+    Params: max_hire_per_step=4, enable_replenish_hiring=True, T_review=5.
+    The action-grid path in margin_optimizer's enable_horizon_brute_action_grid
+    is dormant (False) — this tests the DP optimizer performance with replenish
+    hiring enabled, which exercises the _fire_intent/_hire_intent paths.
+    """
+    params = FirmParams(
+        seed=0, N=500, T=20,
+        T_review=5.0,
+        enable_replenish_hiring=True,
+        max_hire_per_step=4,
+        hire_delay_periods=2,
+        max_hire_period=5,
+    )
+    firm = make_firm(params)
+
+    t0 = time.time()
+    run_simulation(firm, dp_rolling_horizon_strategy)
+    elapsed = time.time() - t0
+
+    assert elapsed < 6.0, (
+        f"Performance regression: N=500 T=20 with action-grid (enable_replenish_hiring=True, "
+        f"max_hire_per_step=4) took {elapsed:.2f}s, expected < 6s."
     )

@@ -8,6 +8,15 @@ Posteriors are run-state: alpha_hat[i] and beta_hat[i] are updated in-place
 as tasks are observed running in modes T and A respectively. They are cleared
 to _DP_PRIOR_MEAN by Firm.reset() on each fresh run_simulation call.
 
+Forward simulation: _forward_simulate is a thin adapter over the shared
+forward_simulate_action_path from firm_ai_abm.forward_sim. It translates
+the DP's (n_fire, n_aug) 2-tuples into Action(n_fire, n_aug, n_hire=0) objects
+and delegates to the canonical implementation (unify-strategy-controls, T-02).
+
+Intent protocol: dp_rolling_horizon_strategy writes firm._fire_intent (via the
+_dp_optimizer_n_fire property alias) at the end of each call — consumed by
+simulate.py Step 0 of the NEXT period. The alias is defined in firm.py.
+
 Usage:
     from firm_ai_abm.dp_optimizer import dp_rolling_horizon_strategy
     df = run_simulation(firm, dp_rolling_horizon_strategy)
