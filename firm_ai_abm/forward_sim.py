@@ -10,7 +10,9 @@ Key design points:
   - Fire cost: c_fire * |threshold_set ∪ planned_set|. Closes F-03.
   - Hire cost: charged at drain period (s + hire_delay_periods), not at queue time.
     Per review.py:417.
-  - Not supported under enable_hiring=True (raises RuntimeError).
+  - Works under both enable_hiring=True and enable_replenish_hiring=True. When
+    action.n_hire > 0, workers are sampled and appended to f_workforce at drain time
+    so subsequent steps see the updated workforce size and theta distribution.
 
 Imports from dp_optimizer are LAZY (function-level) to avoid circular imports
 at module load time: forward_sim ← dp_optimizer ← forward_sim would be circular
@@ -25,7 +27,7 @@ from typing import NamedTuple, TYPE_CHECKING
 import numpy as np
 
 from firm_ai_abm.production import Mode, productivity_vec, cost_vec
-from firm_ai_abm.workers import task_to_worker_map
+from firm_ai_abm.workers import task_to_worker_map, Workforce, sample_workforce
 from firm_ai_abm.review import firing_review
 
 if TYPE_CHECKING:
@@ -74,16 +76,11 @@ def forward_simulate_action_path(
 
     Hire-cost timing: c_hire is charged at the projected drain step
     (s + hire_delay_periods), not at queue time. Matches review.py:417.
-    Not supported under enable_hiring=True (raises RuntimeError).
+    Supports both enable_hiring=True and enable_replenish_hiring=True; when
+    action.n_hire > 0 workers are sampled and appended to the workforce copy.
 
     Uses function-level imports from dp_optimizer to avoid circular imports.
     """
-    if firm.params.enable_hiring:
-        raise RuntimeError(
-            "forward_simulate_action_path is not supported under enable_hiring=True; "
-            "use enable_replenish_hiring instead."
-        )
-
     # Lazy imports to avoid circular: forward_sim ← dp_optimizer ← forward_sim
     from firm_ai_abm.dp_optimizer import (
         _apply_action_to_modes,
@@ -94,6 +91,11 @@ def forward_simulate_action_path(
 
     params = firm.params
     K_max_orig = params.N // params.tasks_per_worker
+
+    # Isolate planning rng from live kernel state — prevents rng leakage across
+    # planning calls (each planning path that samples workers would otherwise
+    # advance firm.rng, breaking reproducibility for identical-seed runs).
+    plan_rng = copy.deepcopy(firm.rng)
 
     # Deep-copy workforce once (immutable view of the rest)
     f_workforce = copy.deepcopy(firm.workforce)
@@ -143,10 +145,23 @@ def forward_simulate_action_path(
             opw_hist = getattr(firm, "_output_per_worker_so_far", None)
             if opw_hist is None:
                 opw_hist = np.zeros((1, max(firm.workforce.K, f_workforce.K)), dtype=np.float64)
+            # _sort_fireable_workers_by_cost_effectiveness uses firm.workforce.K as K.
+            # After firings f_workforce.K may be smaller — pad wages to orig K with inf
+            # so removed worker slots are never chosen, then filter back to f_workforce bounds.
+            fw_K = f_workforce.K
+            orig_K = firm.workforce.K
+            if fw_K < orig_K:
+                wages_for_sort = np.concatenate([
+                    f_workforce.wage,
+                    np.full(orig_K - fw_K, np.inf, dtype=np.float64),
+                ])
+            else:
+                wages_for_sort = f_workforce.wage
             planned_order = _sort_fireable_workers_by_cost_effectiveness(
-                firm, opw_hist, f_workforce.wage, step_t
+                firm, opw_hist, wages_for_sort, step_t
             )
-            planned_set = planned_order[:action.n_fire].astype(int)
+            # Keep only indices within current f_workforce bounds
+            planned_set = planned_order[planned_order < fw_K][:action.n_fire].astype(int)
             merged = np.unique(np.concatenate([threshold_set, planned_set]))
             path_pi -= params.c_fire * len(merged)
             f_workforce, _, _ = _apply_firings_on_workforce(f_workforce, merged, step_t)
@@ -156,18 +171,38 @@ def forward_simulate_action_path(
 
         # ------------------------------------------------------------------
         # Step 2: Strategy's planned hiring (n_fire == 0 guard per D-04)
+        # Works under both enable_replenish_hiring and enable_hiring.
         # Cost charged at drain period, not queue time — per review.py:417
         # ------------------------------------------------------------------
-        if action.n_hire > 0 and action.n_fire == 0 and params.enable_replenish_hiring:
+        hiring_enabled = params.enable_replenish_hiring or params.enable_hiring
+        if action.n_hire > 0 and action.n_fire == 0 and hiring_enabled:
             pending.append((step_t + params.hire_delay_periods, action.n_hire))
 
         # ------------------------------------------------------------------
         # Step 3: Drain pending hires arriving this step — charge c_hire now
+        # and materialize new workers in f_workforce (extends theta/wage SoA)
         # ------------------------------------------------------------------
-        n_arr = sum(n for (per, n) in pending if per == step_t)
+        n_arr = sum(n for (per, n) in pending if per <= step_t)
         if n_arr > 0:
-            path_pi -= params.c_hire * n_arr
-        pending = [(per, n) for (per, n) in pending if per > step_t]
+            n_new = min(n_arr, K_max_orig - f_workforce.K)
+            if n_new > 0:
+                path_pi -= params.c_hire * n_new
+                new_w = sample_workforce(n_new, params, plan_rng, current_t=step_t)
+                combined_aip = (
+                    np.concatenate([f_workforce.a_training_in_progress, new_w.a_training_in_progress])
+                    if f_workforce.a_training_in_progress is not None and new_w.a_training_in_progress is not None
+                    else None
+                )
+                f_workforce = Workforce(
+                    theta=np.concatenate([f_workforce.theta, new_w.theta]),
+                    wage=np.concatenate([f_workforce.wage, new_w.wage]),
+                    a_trained=np.concatenate([f_workforce.a_trained, new_w.a_trained]),
+                    tenure=np.concatenate([f_workforce.tenure, new_w.tenure]),
+                    hire_t=np.concatenate([f_workforce.hire_t, new_w.hire_t]),
+                    cum_wage=np.concatenate([f_workforce.cum_wage, new_w.cum_wage]),
+                    a_training_in_progress=combined_aip,
+                )
+        pending = [(per, n) for (per, n) in pending if per > step_t]  # keep only future
 
         # ------------------------------------------------------------------
         # Step 4: Apply mode change (promote top n_aug H tasks by beta_hat → A)

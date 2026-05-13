@@ -165,6 +165,12 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
                 n_target_hires = max(0, K_target - firm.workforce.K)
                 if n_target_hires > 0:
                     firm.pending_hires.append((t + params.hire_delay_periods, n_target_hires))
+            # Consume _hire_intent written by horizon strategies (mirrors Step 0.5b).
+            # Suppress when firing occurred this period (auto-hire from K* handles it).
+            hire_intent = int(getattr(firm, "_hire_intent", 0))
+            if hire_intent > 0 and n_review_fired_period == 0:
+                firm.pending_hires.append((t + params.hire_delay_periods, hire_intent))
+            firm._hire_intent = 0  # type: ignore[attr-defined]  # unconditional reset after read
             # Drain due backlog entries (shared drainer; enforces K_max cap).
             (
                 firm.workforce,
