@@ -4,7 +4,7 @@ Single-page app that imports the simulation kernel directly and renders
 13 Plotly charts across 5 tabs with primary controls in the main panel.
 
 Architecture notes:
-- @st.cache_data keyed on a 31-tuple of scalars (D-01): avoids passing
+- @st.cache_data keyed on a 35-tuple of scalars (D-01): avoids passing
   the FirmParams dataclass directly and sidesteps hash_funcs API.
 - Default seed=0 (D-02): prevents cache instability from seed=None.
 - Run button gates the simulation (D-04): no auto-rerun on slider drag.
@@ -88,11 +88,12 @@ _STRATEGY_REGISTRY = {
     "horizon_optimizer": target_margin_strategy,
 }
 
-# 30 scalar FirmParams fields in order (excludes 'seed' which is appended separately)
+# 34 scalar FirmParams fields in order (excludes 'seed' which is appended separately)
 # Indices: 0=N, 15=sigma_theta, 20=T_review, 21=firing_threshold, 22=scenario_mode,
 #          23=target_margin, 24=margin_horizon, 25=enable_training_delay,
 #          26=enable_hiring, 27=enable_replenish_hiring, 28=max_hire_period,
-#          29=hire_delay_periods, -1=seed (position 30)
+#          29=hire_delay_periods, 30=alpha_mean, 31=alpha_concentration,
+#          32=beta_mean, 33=beta_concentration, -1=seed (position 34)
 # NOTE: alpha-cost fields (c_auto_alpha_slope, c_auto_alpha_intercept, belief_alpha)
 # are intentionally absent — no sidebar exposure.
 _PARAM_FIELDS = (
@@ -107,7 +108,11 @@ _PARAM_FIELDS = (
     "enable_hiring",                # index 26
     "enable_replenish_hiring",      # index 27
     "max_hire_period",              # index 28
-    "hire_delay_periods",           # index 29; seed moves to position 30 (still key[-1])
+    "hire_delay_periods",           # index 29
+    "alpha_mean",                   # index 30
+    "alpha_concentration",          # index 31
+    "beta_mean",                    # index 32
+    "beta_concentration",           # index 33; seed moves to position 34 (still key[-1])
 )
 
 # Named index constant for sigma_theta (used in tab_het branch logic)
@@ -121,16 +126,17 @@ assert set(_PARAM_FIELDS + ("seed",)) <= {f.name for f in dataclasses.fields(Fir
 
 
 def params_to_key(params: FirmParams, seed: int) -> tuple:
-    """Build a 31-tuple cache key from a FirmParams instance and seed.
+    """Build a 35-tuple cache key from a FirmParams instance and seed.
 
     The tuple contains only Python scalars (int, float, bool, str). math.inf is
     included as a float — hash(math.inf) is stable in CPython.
-    seed is appended as the 31st element (position 30).
+    seed is appended as the 35th element (position 34).
 
     Indices: 0=N, 15=sigma_theta, 20=T_review, 21=firing_threshold, 22=scenario_mode,
              23=target_margin, 24=margin_horizon, 25=enable_training_delay,
              26=enable_hiring, 27=enable_replenish_hiring, 28=max_hire_period,
-             29=hire_delay_periods, -1=seed (position 30)
+             29=hire_delay_periods, 30=alpha_mean, 31=alpha_concentration,
+             32=beta_mean, 33=beta_concentration, -1=seed (position 34)
     """
     values = tuple(getattr(params, f) for f in _PARAM_FIELDS)
     return values + (seed,)
@@ -138,7 +144,7 @@ def params_to_key(params: FirmParams, seed: int) -> tuple:
 
 # All widget key strings used in _build_controls — for Reset button
 # Net delta from prior version: +strategy, +hiring_mode, -enable_hiring,
-# -enable_replenish_hiring → net 0; final count = 31.
+# -enable_replenish_hiring → net 0; +4 (alpha/beta dist params); final count = 35.
 ALL_WIDGET_KEYS = (
     "strategy",
     "N", "T", "seed",
@@ -152,6 +158,7 @@ ALL_WIDGET_KEYS = (
     "hiring_mode",
     "hire_delay_periods", "max_hire_period",
     "enable_training_delay",
+    "alpha_mean", "alpha_concentration", "beta_mean", "beta_concentration",
 )
 
 # ---------------------------------------------------------------------------
@@ -175,11 +182,12 @@ def run_cached(params_key: tuple, strategy_name: str) -> tuple:
     """Run the simulation for the given params key and strategy.
 
     Args:
-        params_key: 31-tuple from params_to_key(). The last element is seed.
+        params_key: 35-tuple from params_to_key(). The last element is seed.
             Indices 15=sigma_theta, 20=T_review, 21=firing_threshold, 22=scenario_mode,
             23=target_margin, 24=margin_horizon, 25=enable_training_delay,
             26=enable_hiring, 27=enable_replenish_hiring, 28=max_hire_period,
-            29=hire_delay_periods, -1=seed (position 30).
+            29=hire_delay_periods, 30=alpha_mean, 31=alpha_concentration,
+            32=beta_mean, 33=beta_concentration, -1=seed (position 34).
         strategy_name: key into _STRATEGY_REGISTRY.
 
     Returns:
@@ -371,7 +379,7 @@ def _build_controls() -> tuple:
         adv_tabs = st.tabs([
             "Costs",
             "Strategy & pricing",
-            "Worker heterogeneity",
+            "Heterogeneity",
             "Firing (advanced)",
             "Productivity baseline",
             "Reproducibility",
@@ -424,8 +432,36 @@ def _build_controls() -> tuple:
                 key="margin_horizon",
             )
 
-        # Worker heterogeneity (unchanged)
+        # Heterogeneity: task attributes (alpha, beta) + worker (theta, wage)
         with adv_tabs[2]:
+            st.markdown("**Task attributes (alpha, beta)**")
+            alpha_mean = st.slider(
+                "alpha_mean (automatability — Beta dist mean)",
+                0.0, 1.0, float(FirmParams().alpha_mean), 0.05,
+                help="Mean of the Beta(a, b) distribution from which task automatability "
+                     "alpha is drawn. Default 0.5 with concentration=2 is Uniform(0,1).",
+                key="alpha_mean",
+            )
+            alpha_concentration = st.slider(
+                "alpha_concentration (Beta dist concentration kappa)",
+                2.0, 50.0, float(FirmParams().alpha_concentration), 0.5,
+                help="Higher = tighter distribution about the mean. kappa=2 with mean=0.5 "
+                     "is Uniform(0,1); kappa=50 gives std ≈ 0.07 at mean=0.5.",
+                key="alpha_concentration",
+            )
+            beta_mean = st.slider(
+                "beta_mean (augmentability — Beta dist mean)",
+                0.0, 1.0, float(FirmParams().beta_mean), 0.05,
+                help="Mean of the Beta(a, b) distribution from which task augmentability beta is drawn.",
+                key="beta_mean",
+            )
+            beta_concentration = st.slider(
+                "beta_concentration (Beta dist concentration kappa)",
+                2.0, 50.0, float(FirmParams().beta_concentration), 0.5,
+                help="Higher = tighter distribution about the mean.",
+                key="beta_concentration",
+            )
+            st.markdown("**Worker (theta, wage)**")
             sigma_theta = st.slider(
                 "sigma_theta", 0.0, 0.5, float(FirmParams().sigma_theta), 0.01,
                 help="Std dev of theta (worker skill)", key="sigma_theta",
@@ -531,6 +567,10 @@ def _build_controls() -> tuple:
         enable_replenish_hiring=bool(enable_replenish_hiring_val),
         max_hire_period=int(max_hire_period_val),
         hire_delay_periods=int(hire_delay_periods_val),
+        alpha_mean=float(alpha_mean),
+        alpha_concentration=float(alpha_concentration),
+        beta_mean=float(beta_mean),
+        beta_concentration=float(beta_concentration),
         seed=int(seed),
     )
     key = params_to_key(draft_params, int(seed))

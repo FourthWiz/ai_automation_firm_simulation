@@ -13,9 +13,11 @@ include wages; this is load-bearing for check3, check4, and check5 correctness.
 Numeraire scope:
 - SCALED_PARAMS (9 fields): the monetary parameters that scale profit linearly.
   firing_threshold added in Phase 1.5 Stage 7 (adaptive-firing-surplus).
-- UNSCALED_PARAMS (25 fields): productivity scalars, counts, flags, and the seed.
+- UNSCALED_PARAMS (29 fields): productivity scalars, counts, flags, and the seed.
   Three fields added in Phase 1.5 Stage X (augment-replenish-hiring):
   enable_replenish_hiring, max_hire_period, hire_delay_periods.
+  Four fields added in beta-dist-task-attrs:
+  alpha_mean, alpha_concentration, beta_mean, beta_concentration.
   These two tuples partition dataclasses.fields(FirmParams) exactly (no overlap,
   no missing field). An in-code assertion in check5_numeraire enforces this
   contract; any future FirmParams field addition will raise immediately on
@@ -103,13 +105,18 @@ UNSCALED_PARAMS: tuple[str, ...] = (
     # and belief sentinel (D-02). Monetary scaling comes through the w/tpw factor in cost_vec.
     # Phase 1.5 Stage X (augment-replenish-hiring): three new non-monetary fields.
     # enable_replenish_hiring: boolean flag; max_hire_period: count; hire_delay_periods: count.
-    # Total: 9 SCALED + 25 UNSCALED = 34 FirmParams fields.
+    # beta-dist-task-attrs: four new non-monetary distribution-shape fields.
+    # Total: 9 SCALED + 29 UNSCALED = 38 FirmParams fields.
     "c_auto_alpha_slope",
     "c_auto_alpha_intercept",
     "belief_alpha",
     "enable_replenish_hiring",
     "max_hire_period",
     "hire_delay_periods",
+    "alpha_mean",
+    "alpha_concentration",
+    "beta_mean",
+    "beta_concentration",
 )
 
 

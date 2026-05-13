@@ -65,8 +65,12 @@ def test_tabs_present():
 
     Note: at.tabs returns ALL tabs including the 6 advanced-expander tabs
     (total 11). The plot tabs are always the last 5 in render order.
-    Advanced tabs (D-05): Costs | Strategy & pricing | Worker heterogeneity |
+    Advanced tabs (D-05): Costs | Strategy & pricing | Heterogeneity |
                           Firing (advanced) | Productivity baseline | Reproducibility
+    Note on asymmetry: adv_tabs[2] was renamed from "Worker heterogeneity" to
+    "Heterogeneity" (beta-dist-task-attrs D-06) to cover both task and worker
+    dispersion controls. The *plot* tab "Worker heterogeneity" retains its old
+    name — it visualizes only worker theta/wage outputs.
     """
     at = _get_at()
     assert not at.exception
@@ -79,14 +83,14 @@ def test_tabs_present():
     # Advanced tabs are the first 6
     advanced_tabs = all_tabs[:6]
     expected_advanced_labels = [
-        "Costs", "Strategy & pricing", "Worker heterogeneity",
+        "Costs", "Strategy & pricing", "Heterogeneity",
         "Firing (advanced)", "Productivity baseline", "Reproducibility",
     ]
     actual_advanced_labels = [t.label for t in advanced_tabs]
     assert actual_advanced_labels == expected_advanced_labels, (
         f"Advanced tab labels mismatch. Expected {expected_advanced_labels}, got {actual_advanced_labels}"
     )
-    # Plot tabs are the last 5
+    # Plot tabs are the last 5 — plot tab retains "Worker heterogeneity" (unchanged)
     plot_tabs = all_tabs[-5:]
     expected_plot_labels = ["Outcomes", "Workforce", "Tasks & modes", "Wages", "Worker heterogeneity"]
     actual_plot_labels = [t.label for t in plot_tabs]

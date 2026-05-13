@@ -93,8 +93,8 @@ def make_firm(params: FirmParams) -> Firm:
     """
     validate_hiring_params(params)
     rng = np.random.default_rng(params.seed)
-    alpha = sample_alpha(params.N, rng)
-    beta = sample_beta(params.N, rng)
+    alpha = sample_alpha(params.N, rng, params.alpha_mean, params.alpha_concentration)
+    beta = sample_beta(params.N, rng, params.beta_mean, params.beta_concentration)
     firm = Firm(params=params, alpha=alpha, beta=beta, rng=rng)
     # Sample workforce BEFORE reset() so rng state is stable across resets (CRIT-2)
     firm.workforce = _make_initial_workforce(params, rng)
