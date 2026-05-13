@@ -1,10 +1,10 @@
 """Phase 1.5 FirmBehavior Streamlit dashboard.
 
 Single-page app that imports the simulation kernel directly and renders
-8 plots (4 rows × 2 columns) with a sidebar for all FirmParams controls.
+13 Plotly charts across 5 tabs with primary controls in the main panel.
 
 Architecture notes:
-- @st.cache_data keyed on a 23-tuple of scalars (D-01): avoids passing
+- @st.cache_data keyed on a 31-tuple of scalars (D-01): avoids passing
   the FirmParams dataclass directly and sidesteps hash_funcs API.
 - Default seed=0 (D-02): prevents cache instability from seed=None.
 - Run button gates the simulation (D-04): no auto-rerun on slider drag.
@@ -14,6 +14,7 @@ Architecture notes:
   is the SAME on cache hits (same cached 5-tuple). The app writes this timestamp
   to session_state["RUN_COUNTER_VAL_THIS_RUN"] so AppTest can detect cache hits
   by checking if the value changes between calls.
+- N default: FirmParams().N = 100 (sidebar previously hardcoded 500 — corrected).
 
 Run:
     .venv/bin/streamlit run app.py
@@ -55,6 +56,15 @@ from firm_ai_abm.dashboard import (
     fig_hiring_events,
     fig_mean_accum_wage_over_time,
 )
+from firm_ai_abm.production import Mode
+
+# set_page_config MUST be the first Streamlit call at module level
+st.set_page_config(
+    page_title="Firm Behavior under AI — Simulator",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
 # ---------------------------------------------------------------------------
 # T-04: Strategy registry and params key helpers
@@ -70,7 +80,7 @@ _STRATEGY_REGISTRY = {
 }
 
 # 30 scalar FirmParams fields in order (excludes 'seed' which is appended separately)
-# Indices: 0=N, 20=T_review, 21=firing_threshold, 22=scenario_mode,
+# Indices: 0=N, 15=sigma_theta, 20=T_review, 21=firing_threshold, 22=scenario_mode,
 #          23=target_margin, 24=margin_horizon, 25=enable_training_delay,
 #          26=enable_hiring, 27=enable_replenish_hiring, 28=max_hire_period,
 #          29=hire_delay_periods, -1=seed (position 30)
@@ -91,6 +101,9 @@ _PARAM_FIELDS = (
     "hire_delay_periods",           # index 29; seed moves to position 30 (still key[-1])
 )
 
+# Named index constant for sigma_theta (used in tab_het branch logic)
+_SIGMA_THETA_IDX = _PARAM_FIELDS.index("sigma_theta")  # == 15
+
 # Subset assertion: catch misspellings without requiring exhaustive coverage.
 # Alpha-cost fields are intentionally excluded from _PARAM_FIELDS (no sidebar).
 assert set(_PARAM_FIELDS + ("seed",)) <= {f.name for f in dataclasses.fields(FirmParams)}, (
@@ -105,7 +118,7 @@ def params_to_key(params: FirmParams, seed: int) -> tuple:
     included as a float — hash(math.inf) is stable in CPython.
     seed is appended as the 31st element (position 30).
 
-    Indices: 0=N, 20=T_review, 21=firing_threshold, 22=scenario_mode,
+    Indices: 0=N, 15=sigma_theta, 20=T_review, 21=firing_threshold, 22=scenario_mode,
              23=target_margin, 24=margin_horizon, 25=enable_training_delay,
              26=enable_hiring, 27=enable_replenish_hiring, 28=max_hire_period,
              29=hire_delay_periods, -1=seed (position 30)
@@ -113,6 +126,20 @@ def params_to_key(params: FirmParams, seed: int) -> tuple:
     values = tuple(getattr(params, f) for f in _PARAM_FIELDS)
     return values + (seed,)
 
+
+# All widget key strings used in _build_controls — for Reset button
+ALL_WIDGET_KEYS = (
+    "scenario", "N", "seed",
+    "q_a", "g", "c_auto", "w", "p", "target_margin",
+    "T", "tasks_per_worker",
+    "q_h", "c_aug", "c_fire", "c_hire", "c_train", "F",
+    "n_amortize", "margin_horizon",
+    "sigma_theta", "theta_min", "theta_max", "corr_w_theta", "sigma_w",
+    "T_review", "firing_threshold",
+    "enable_hiring", "enable_replenish_hiring",
+    "hire_delay_periods", "max_hire_period",
+    "enable_training_delay",
+)
 
 # ---------------------------------------------------------------------------
 # T-07: Cache-hit observability counter
@@ -136,7 +163,7 @@ def run_cached(params_key: tuple, strategy_name: str) -> tuple:
 
     Args:
         params_key: 31-tuple from params_to_key(). The last element is seed.
-            Indices 20=T_review, 21=firing_threshold, 22=scenario_mode,
+            Indices 15=sigma_theta, 20=T_review, 21=firing_threshold, 22=scenario_mode,
             23=target_margin, 24=margin_horizon, 25=enable_training_delay,
             26=enable_hiring, 27=enable_replenish_hiring, 28=max_hire_period,
             29=hire_delay_periods, -1=seed (position 30).
@@ -178,198 +205,262 @@ def run_cached(params_key: tuple, strategy_name: str) -> tuple:
 
 
 # ---------------------------------------------------------------------------
-# T-05: Sidebar
+# P1-4: Controls (primary bar + advanced expander)
 # ---------------------------------------------------------------------------
 
-def _build_sidebar() -> tuple:
-    """Render the sidebar controls and return (params_key, strategy_name).
+def _build_controls() -> tuple:
+    """Render primary controls in the main panel and return (strategy, params_key, draft_params).
+
+    Primary controls are rendered inline (called before the run button).
+    Advanced controls are inside an expander below the primary bar.
 
     Returns:
-        (strategy_name: str, params_key: tuple[23 scalars])
+        (strategy_name: str, params_key: tuple[31 scalars], draft_params: FirmParams)
     """
-    st.sidebar.title("FirmBehavior dashboard")
+    # ------------------------------------------------------------------
+    # Row A: scenario | strategy | N | seed
+    # ------------------------------------------------------------------
+    col_a1, col_a2, col_a3, col_a4 = st.columns([1, 1, 1, 1])
 
-    # Scenario selector — comes before strategy (T-09)
-    scenario = st.sidebar.radio("Scenario", ["price", "margin"], index=0, key="scenario")
-
-    if scenario == "margin":
-        # Hide strategy radio in margin mode; strategy is forced to target_margin
-        st.sidebar.markdown("Strategy: target_margin (auto)")
-        strategy = "target_margin"
-    else:
-        # Strategy selector — default to greedy_profit (index 3)
-        strategy = st.sidebar.radio(
-            "Strategy",
-            [k for k in _STRATEGY_REGISTRY if k != "target_margin"],
-            index=3,
+    with col_a1:
+        scenario = st.radio(
+            "Scenario",
+            ["price", "margin"],
+            index=0,
+            key="scenario",
         )
 
-    # Counts — use exact field names as labels (required for test_sidebar_all_param_fields_present)
-    with st.sidebar.expander("Counts", expanded=True):
+    with col_a2:
+        if scenario == "margin":
+            st.markdown("**Strategy:** target_margin *(auto)*")
+            strategy = "target_margin"
+        else:
+            strategy = st.radio(
+                "Strategy",
+                [k for k in _STRATEGY_REGISTRY if k != "target_margin"],
+                index=3,
+            )
+
+    with col_a3:
         N = st.number_input(
-            "N", min_value=1, max_value=1000, value=500, step=10,
-            help="Number of tasks per firm", key="N",
-        )
-        T = st.number_input(
-            "T", min_value=1, max_value=200, value=FirmParams().T, step=10,
-            help="Simulation periods", key="T",
-        )
-        tasks_per_worker = st.number_input(
-            "tasks_per_worker", min_value=1, max_value=100,
-            value=FirmParams().tasks_per_worker, step=1,
-            help="K_workforce = N / tasks_per_worker. Lowering this RAISES K.", key="tasks_per_worker",
+            "Firm size in tasks (N)",
+            min_value=1, max_value=1000,
+            value=int(FirmParams().N),
+            step=10,
+            help="Number of tasks per firm (FirmParams default: 100)",
+            key="N",
         )
 
-    # Productivity
-    with st.sidebar.expander("Productivity", expanded=False):
-        q_h = st.slider("q_h", 0.0, 3.0, float(FirmParams().q_h), 0.05,
-                        help="Human productivity per task", key="q_h")
-        q_a = st.slider("q_a", 0.0, 3.0, float(FirmParams().q_a), 0.05,
-                        help="Automation productivity multiplier", key="q_a")
-        g = st.slider("g", 0.0, 3.0, float(FirmParams().g), 0.05,
-                      help="Augmentation gain parameter", key="g")
-
-    # Costs
-    with st.sidebar.expander("Costs", expanded=False):
-        w = st.slider("w", 0.0, 5.0, float(FirmParams().w), 0.1,
-                      help="Wage rate", key="w")
-        c_aug = st.slider("c_aug", 0.0, 1.0, float(FirmParams().c_aug), 0.01,
-                          help="Augmentation cost per task", key="c_aug")
-        c_auto = st.slider("c_auto", 0.0, 2.0, float(FirmParams().c_auto), 0.05,
-                           help="Automation cost per task", key="c_auto")
-        c_fire = st.slider("c_fire", 0.0, 10.0, float(FirmParams().c_fire), 0.1,
-                           help="Firing cost per worker", key="c_fire")
-        c_hire = st.slider("c_hire", 0.0, 5.0, float(FirmParams().c_hire), 0.1,
-                           help="Hiring cost per worker", key="c_hire")
-        c_train = st.slider("c_train", 0.0, 2.0, float(FirmParams().c_train), 0.05,
-                            help="Training cost per worker", key="c_train")
-        F = st.slider("F", 0.0, 20.0, float(FirmParams().F), 0.5,
-                      help="Fixed overhead cost per period", key="F")
-
-    # Price
-    with st.sidebar.expander("Price", expanded=False):
-        p = st.slider("p", 0.1, 2.0, float(FirmParams().p), 0.05,
-                      help="Output price", key="p")
-
-    # Strategy meta
-    with st.sidebar.expander("Strategy meta", expanded=False):
-        n_amortize = st.number_input(
-            "n_amortize", min_value=1, max_value=24,
-            value=FirmParams().n_amortize, step=1,
-            help="Amortization periods for greedy_with_switching", key="n_amortize",
+    with col_a4:
+        seed = st.number_input(
+            "Seed (random)",
+            min_value=0, value=0, step=1,
+            help="seed=0 default; change to vary worker draws.",
+            key="seed",
         )
 
-    # Heterogeneity
-    with st.sidebar.expander("Heterogeneity", expanded=False):
-        sigma_theta = st.slider(
-            "sigma_theta", 0.0, 0.5, float(FirmParams().sigma_theta), 0.01,
-            help="Std dev of theta (worker skill)", key="sigma_theta",
-        )
-        theta_min = st.slider(
-            "theta_min", 0.1, 1.0, float(FirmParams().theta_min), 0.05,
-            help="Minimum worker skill", key="theta_min",
-        )
-        theta_max = st.slider(
-            "theta_max", 1.0, 2.0, float(FirmParams().theta_max), 0.05,
-            help="Maximum worker skill", key="theta_max",
-        )
-        corr_w_theta = st.slider(
-            "corr_w_theta", 0.0, 1.5, float(FirmParams().corr_w_theta), 0.05,
-            help="Correlation between wage and theta", key="corr_w_theta",
-        )
-        sigma_w = st.slider(
-            "sigma_w", 0.0, 0.3, float(FirmParams().sigma_w), 0.01,
-            help="Wage noise std dev", key="sigma_w",
+    # ------------------------------------------------------------------
+    # Row B: q_a | g | c_auto | w
+    # ------------------------------------------------------------------
+    col_b1, col_b2, col_b3, col_b4 = st.columns([1, 1, 1, 1])
+
+    with col_b1:
+        q_a = st.slider(
+            "AI productivity ceiling (q_a)",
+            0.0, 3.0, float(FirmParams().q_a), 0.05,
+            help="Automation productivity multiplier",
+            key="q_a",
         )
 
-    # Firing review
-    with st.sidebar.expander("Firing review", expanded=False):
-        T_REVIEW_OPTIONS = ["inf", 5, 10, 20, 30]
-        T_review_choice = st.select_slider(
-            "T_review", options=T_REVIEW_OPTIONS, value="inf",
-            help="Review period (inf = disabled)", key="T_review",
-        )
-        T_review_value = math.inf if T_review_choice == "inf" else float(T_review_choice)
-        # firing_threshold_ui is in per-task-output units (comparable to q_h ≈ 1.0).
-        # The kernel's surplus is per-worker output minus per-worker wage; per-worker
-        # output ≈ q_h × tasks_per_worker, so the kernel threshold must be scaled.
-        # UI range [-1.0, 1.0] maps to kernel range [-tpw, tpw].
-        # Default 0.0: fire workers whose per-task output < per-worker wage.
-        firing_threshold_ui = st.slider(
-            "firing_threshold", -1.0, 1.0, 0.0, 0.05,
-            help=(
-                "Per-task surplus threshold. Workers fired when "
-                "(p · mean_output − wage) < threshold · tasks_per_worker, "
-                "where mean_output is summed over the worker's tasks. "
-                "Threshold expressed in per-task price-scaled surplus units. "
-                "0 = fire workers whose price-scaled output does not cover their wage."
-            ),
-            key="firing_threshold",
-        )
-        # Convert UI (per-task) → kernel (per-worker) by multiplying by tasks_per_worker
-        firing_threshold_kernel = float(firing_threshold_ui) * int(tasks_per_worker)
-        # enable_hiring UI default: False (matches FirmParams default) — hiring incurs c_hire; must be opt-in
-        enable_hiring_val = st.checkbox(
-            "enable_hiring",
-            value=False,
-            help="When enabled, fired workers are immediately rehired toward K*. c_hire is charged per hire.",
-            key="enable_hiring",
-        )
-        # Replenishment hiring — mutually exclusive with enable_hiring.
-        # Server-side validation in make_firm is authoritative; UI warns but does not block.
-        enable_replenish_hiring_val = st.checkbox(
-            "enable_replenish_hiring",
-            value=False,
-            help="Augmentation-targeted backlog hiring. Mutually exclusive with enable_hiring.",
-            key="enable_replenish_hiring",
-        )
-        if enable_hiring_val and enable_replenish_hiring_val:
-            st.warning("enable_hiring and enable_replenish_hiring are mutually exclusive — disable one.", icon="⚠️")
-        hire_delay_periods_val = st.number_input(
-            "hire_delay_periods", min_value=1, max_value=20,
-            value=FirmParams().hire_delay_periods, step=1,
-            help="Periods to wait before hiring back fired workers (>=1). Active only when enable_replenish_hiring=True.",
-            key="hire_delay_periods",
-            disabled=not enable_replenish_hiring_val,
-        )
-        max_hire_period_val = st.number_input(
-            "max_hire_period", min_value=0, max_value=200,
-            value=FirmParams().max_hire_period, step=1,
-            help="Per-period hire cap from backlog. 0 = drain entire backlog in one period.",
-            key="max_hire_period",
+    with col_b2:
+        g = st.slider(
+            "Augmentation gain (g)",
+            0.0, 3.0, float(FirmParams().g), 0.05,
+            help="Augmentation gain parameter",
+            key="g",
         )
 
-    # Margin scenario (T-09)
-    with st.sidebar.expander("Margin scenario", expanded=False):
+    with col_b3:
+        c_auto = st.slider(
+            "Automation cost per task (c_auto)",
+            0.0, 2.0, float(FirmParams().c_auto), 0.05,
+            help="Automation cost per task",
+            key="c_auto",
+        )
+
+    with col_b4:
+        w = st.slider(
+            "Wage rate (w)",
+            0.0, 5.0, float(FirmParams().w), 0.1,
+            help="Wage rate",
+            key="w",
+        )
+
+    # ------------------------------------------------------------------
+    # Row C: p (price mode) or target_margin (margin mode)
+    # Both widgets are always rendered (disabled when inactive) to keep
+    # widget keys stable across scenario switches.
+    # ------------------------------------------------------------------
+    row_c1, row_c2 = st.columns(2)
+    with row_c1:
+        p = st.slider(
+            "Output price (p)",
+            0.1, 2.0, float(FirmParams().p), 0.05,
+            help="Output price (inactive in margin scenario)",
+            key="p",
+            disabled=(scenario == "margin"),
+        )
+    with row_c2:
         target_margin_val = st.slider(
-            "target_margin", 0.0, 0.5, float(FirmParams().target_margin), 0.01,
+            "Target margin (target_margin)",
+            0.0, 0.5, float(FirmParams().target_margin), 0.01,
             help="Target (revenue − cost) / revenue for the margin-optimizer strategy",
             key="target_margin",
-        )
-        margin_horizon_val = st.number_input(
-            "margin_horizon", min_value=1, max_value=20,
-            value=FirmParams().margin_horizon, step=1,
-            help="Look-ahead periods for margin-optimizer brute grid",
-            key="margin_horizon",
+            disabled=(scenario == "price"),
         )
 
-    # Training (T-09 — dashboard default True; FirmParams default False — deliberate seam D-01)
-    with st.sidebar.expander("Training", expanded=False):
-        enable_training_delay_val = st.checkbox(
-            "enable_training_delay",
-            value=True,
-            help="When enabled, H→A workers produce at H-rate for 1 period before augmentation kicks in.",
-            key="enable_training_delay",
-        )
+    # ------------------------------------------------------------------
+    # Advanced expander: 24 remaining controls
+    # ------------------------------------------------------------------
+    with st.expander("Advanced parameters", expanded=False):
+        adv_tabs = st.tabs([
+            "Run length",
+            "Costs",
+            "Strategy meta",
+            "Worker heterogeneity",
+            "Firing & hiring",
+            "Productivity baseline",
+        ])
 
-    # Seed (D-02: default 0, not None)
-    seed = st.sidebar.number_input(
-        "Seed", min_value=0, value=0, step=1,
-        help="seed=0 default; change to vary worker draws.",
-        key="seed",
-    )
+        # Run length
+        with adv_tabs[0]:
+            T = st.number_input(
+                "T", min_value=1, max_value=200, value=FirmParams().T, step=10,
+                help="Simulation periods", key="T",
+            )
+            tasks_per_worker = st.number_input(
+                "tasks_per_worker", min_value=1, max_value=100,
+                value=FirmParams().tasks_per_worker, step=1,
+                help="K_workforce = N / tasks_per_worker", key="tasks_per_worker",
+            )
 
-    # Build a temporary FirmParams to use params_to_key
+        # Costs
+        with adv_tabs[1]:
+            c_aug = st.slider("c_aug", 0.0, 1.0, float(FirmParams().c_aug), 0.01,
+                              help="Augmentation cost per task", key="c_aug")
+            c_fire = st.slider("c_fire", 0.0, 10.0, float(FirmParams().c_fire), 0.1,
+                               help="Firing cost per worker", key="c_fire")
+            c_hire = st.slider("c_hire", 0.0, 5.0, float(FirmParams().c_hire), 0.1,
+                               help="Hiring cost per worker", key="c_hire")
+            c_train = st.slider("c_train", 0.0, 2.0, float(FirmParams().c_train), 0.05,
+                                help="Training cost per worker", key="c_train")
+            F = st.slider("F", 0.0, 20.0, float(FirmParams().F), 0.5,
+                          help="Fixed overhead cost per period", key="F")
+
+        # Strategy meta
+        with adv_tabs[2]:
+            n_amortize = st.number_input(
+                "n_amortize", min_value=1, max_value=24,
+                value=FirmParams().n_amortize, step=1,
+                help="Amortization periods for greedy_with_switching", key="n_amortize",
+            )
+            margin_horizon_val = st.number_input(
+                "margin_horizon", min_value=1, max_value=20,
+                value=FirmParams().margin_horizon, step=1,
+                help="Look-ahead periods for margin-optimizer brute grid",
+                key="margin_horizon",
+            )
+
+        # Worker heterogeneity
+        with adv_tabs[3]:
+            sigma_theta = st.slider(
+                "sigma_theta", 0.0, 0.5, float(FirmParams().sigma_theta), 0.01,
+                help="Std dev of theta (worker skill)", key="sigma_theta",
+            )
+            theta_min = st.slider(
+                "theta_min", 0.1, 1.0, float(FirmParams().theta_min), 0.05,
+                help="Minimum worker skill", key="theta_min",
+            )
+            theta_max = st.slider(
+                "theta_max", 1.0, 2.0, float(FirmParams().theta_max), 0.05,
+                help="Maximum worker skill", key="theta_max",
+            )
+            corr_w_theta = st.slider(
+                "corr_w_theta", 0.0, 1.5, float(FirmParams().corr_w_theta), 0.05,
+                help="Correlation between wage and theta", key="corr_w_theta",
+            )
+            sigma_w = st.slider(
+                "sigma_w", 0.0, 0.3, float(FirmParams().sigma_w), 0.01,
+                help="Wage noise std dev", key="sigma_w",
+            )
+
+        # Firing & hiring
+        with adv_tabs[4]:
+            T_REVIEW_OPTIONS = ["inf", 5, 10, 20, 30]
+            T_review_choice = st.select_slider(
+                "T_review", options=T_REVIEW_OPTIONS, value="inf",
+                help="Review period (inf = disabled)", key="T_review",
+            )
+            T_review_value = math.inf if T_review_choice == "inf" else float(T_review_choice)
+            # firing_threshold_ui is in per-task-output units.
+            # UI range [-1.0, 1.0] maps to kernel range [-tpw, tpw].
+            firing_threshold_ui = st.slider(
+                "firing_threshold", -1.0, 1.0, 0.0, 0.05,
+                help=(
+                    "Per-task surplus threshold. Workers fired when "
+                    "(p · mean_output − wage) < threshold · tasks_per_worker. "
+                    "0 = fire workers whose price-scaled output does not cover their wage."
+                ),
+                key="firing_threshold",
+            )
+            # Convert UI (per-task) → kernel (per-worker) by multiplying by tasks_per_worker
+            firing_threshold_kernel = float(firing_threshold_ui) * int(tasks_per_worker)
+
+            enable_hiring_val = st.checkbox(
+                "enable_hiring",
+                value=False,
+                help="When enabled, fired workers are immediately rehired toward K*. c_hire is charged per hire.",
+                key="enable_hiring",
+            )
+            enable_replenish_hiring_val = st.checkbox(
+                "enable_replenish_hiring",
+                value=False,
+                help="Augmentation-targeted backlog hiring. Mutually exclusive with enable_hiring.",
+                key="enable_replenish_hiring",
+            )
+            if enable_hiring_val and enable_replenish_hiring_val:
+                st.warning("enable_hiring and enable_replenish_hiring are mutually exclusive — disable one.", icon="⚠️")
+            hire_delay_periods_val = st.number_input(
+                "hire_delay_periods", min_value=1, max_value=20,
+                value=FirmParams().hire_delay_periods, step=1,
+                help="Periods to wait before hiring back fired workers. Active only when enable_replenish_hiring=True.",
+                key="hire_delay_periods",
+                disabled=not enable_replenish_hiring_val,
+            )
+            max_hire_period_val = st.number_input(
+                "max_hire_period", min_value=0, max_value=200,
+                value=FirmParams().max_hire_period, step=1,
+                help="Per-period hire cap from backlog. 0 = drain entire backlog in one period.",
+                key="max_hire_period",
+            )
+
+        # Productivity baseline
+        with adv_tabs[5]:
+            q_h = st.slider(
+                "q_h", 0.0, 3.0, float(FirmParams().q_h), 0.05,
+                help="Human productivity per task", key="q_h",
+            )
+            # Training
+            enable_training_delay_val = st.checkbox(
+                "enable_training_delay",
+                value=True,
+                help="When enabled, H→A workers produce at H-rate for 1 period before augmentation kicks in.",
+                key="enable_training_delay",
+            )
+
+    # ------------------------------------------------------------------
+    # Build FirmParams and cache key
+    # ------------------------------------------------------------------
     draft_params = FirmParams(
         N=int(N),
         T=int(T),
@@ -413,12 +504,33 @@ def _build_sidebar() -> tuple:
 
 def main() -> None:
     """Main app entry point."""
-    st.title("Phase 1.5 simulation")
+    st.title("Firm Behavior under AI")
+    st.caption(
+        "An agent-based simulator of how firms choose between human, AI-augmented, "
+        "and fully automated production. Adjust the dials, hit Run, and see how "
+        "profit, workforce, and task mix evolve over 60 periods."
+    )
 
-    strategy, params_key, draft_params = _build_sidebar()
+    strategy, params_key, draft_params = _build_controls()
 
-    # Run button — gate the simulation (D-04: no auto-rerun on slider change)
-    run_clicked = st.button("Run", type="primary")
+    # ------------------------------------------------------------------
+    # P1-7: Run button + Reset button
+    # ------------------------------------------------------------------
+    run_col, reset_col = st.columns([3, 1])
+    with run_col:
+        run_clicked = st.button("▶ Run simulation", type="primary", key="run_button")
+    with reset_col:
+        reset_clicked = st.button(
+            "Reset to defaults",
+            key="reset_button",
+            help="Restores all controls to default values. Click Run after to re-simulate.",
+        )
+
+    if reset_clicked:
+        for k in list(st.session_state.keys()):
+            if k in ALL_WIDGET_KEYS:
+                del st.session_state[k]
+        st.rerun()
 
     # Initialize last_run_key on first load so the page renders with defaults
     if "last_run_key" not in st.session_state:
@@ -439,18 +551,22 @@ def main() -> None:
     st.caption(f"Strategy: {active_strategy} — seed: {active_key[-1]}")
 
     # Run simulation (or return cached result).
-    # computed_at is a monotonic timestamp captured at actual computation time.
-    # A cache hit returns the SAME (old) timestamp — this is the observable.
+    # Spinner is only shown on explicit run clicks (not on initial load or cache hits).
+    if run_clicked:
+        spinner_ctx = st.spinner("Simulating…")
+        spinner_ctx.__enter__()
     try:
         df, theta_final, wages_final, K_max, computed_at, output_per_worker_list, a_trained_final = run_cached(active_key, active_strategy)
     except Exception as e:
+        if run_clicked:
+            spinner_ctx.__exit__(None, None, None)
         st.error(f"Simulation failed: {type(e).__name__}: {e}")
         st.code(traceback.format_exc(), language="text")
         st.stop()
+    if run_clicked:
+        spinner_ctx.__exit__(None, None, None)
 
     # Write computed_at to session_state so AppTest cache-hit tests can observe it.
-    # Cache hit: same computed_at (cached 5-tuple returned, function body not re-run).
-    # Cache miss: new computed_at (function body ran, new timestamp).
     st.session_state["RUN_COUNTER_VAL_THIS_RUN"] = computed_at
 
     # Stage 5 T-09: cascade warning when workforce drops >50% during run
@@ -462,71 +578,91 @@ def main() -> None:
             "try a lower firing_threshold."
         )
 
-    # 6 rows × 2 columns layout (D-01; row6_right is blank placeholder for Phase 2)
-    row1_left, row1_right = st.columns(2)
-    with row1_left:
-        # Stage 5 D-10: per-period profit replaces cumulative in row1_left
-        st.pyplot(fig_pi_per_period_over_time(df))
-    with row1_right:
-        st.pyplot(fig_K_over_time(df))
+    # ------------------------------------------------------------------
+    # P1-5: KPI strip
+    # ------------------------------------------------------------------
+    cum_pi = float(df["pi"].cumsum().iloc[-1])
+    final_K = int(df["K_active"].iloc[-1])
+    modes_arr = np.stack(df["modes"].values)   # shape (T, N)
+    shares = {
+        "Human": float((modes_arr == int(Mode.H)).mean()),
+        "Augmented": float((modes_arr == int(Mode.A)).mean()),
+        "Automated": float((modes_arr == int(Mode.T)).mean()),
+    }
+    dom_mode = max(shares, key=shares.get)
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Cumulative profit", f"{cum_pi:.2f}")
+    k2.metric("Final workforce (K)", f"{final_K}")
+    k3.metric("Dominant mode", dom_mode, f"{shares[dom_mode]*100:.0f}% of tasks")
 
-    row2_left, row2_right = st.columns(2)
-    with row2_left:
-        st.pyplot(fig_mode_mix_area(df, int(active_key[0])))  # active_key[0] = N
-    with row2_right:
-        st.pyplot(fig_wage_bill_over_time(df))
+    # ------------------------------------------------------------------
+    # P1-6: 5-tab plot layout
+    # Derive hiring flags from active_key (last-run state), not draft params
+    # ------------------------------------------------------------------
+    enable_hiring_active = bool(active_key[26])
+    enable_replenish_active = bool(active_key[27])
 
-    row3_left, row3_right = st.columns(2)
-    with row3_left:
-        st.pyplot(fig_theta_histogram(np.array(theta_final)))
-    with row3_right:
-        st.pyplot(fig_mean_theta_over_time(df))
+    # Prepare wage-vs-output data (preserve existing slice logic verbatim)
+    opw_arr = np.array(output_per_worker_list)
+    K_active_final = int(df["K_active"].iloc[-1])
+    if K_active_final > 0:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            mean_opw = np.nanmean(opw_arr[:, :K_active_final], axis=0)
+        all_nan_mask = np.all(np.isnan(opw_arr[:, :K_active_final]), axis=0)
+        mean_opw[all_nan_mask] = np.nan
+        wages_slice = np.array(wages_final[:K_active_final])
+        a_trained_slice = np.array(a_trained_final[:K_active_final], dtype=bool)
+    else:
+        mean_opw = np.array([])
+        wages_slice = np.array([])
+        a_trained_slice = np.array([], dtype=bool)
 
-    row4_left, row4_right = st.columns(2)
-    with row4_left:
-        st.pyplot(fig_firing_events(df, T_review=float(active_key[20])))
-    with row4_right:
-        st.pyplot(fig_trained_capital(df))
+    tab_out, tab_work, tab_modes, tab_wages, tab_het = st.tabs([
+        "Outcomes", "Workforce", "Tasks & modes", "Wages", "Worker heterogeneity"
+    ])
 
-    row5_left, row5_right = st.columns(2)
-    with row5_left:
-        st.pyplot(fig_wage_histogram(np.array(wages_final)))
-    with row5_right:
-        opw_arr = np.array(output_per_worker_list)
-        K_active_final = int(df["K_active"].iloc[-1])
-        if K_active_final > 0:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", category=RuntimeWarning)
-                mean_opw = np.nanmean(opw_arr[:, :K_active_final], axis=0)
-            all_nan_mask = np.all(np.isnan(opw_arr[:, :K_active_final]), axis=0)
-            mean_opw[all_nan_mask] = np.nan
+    with tab_out:
+        st.plotly_chart(fig_pi_per_period_over_time(df), use_container_width=True, key="fig_pi_period")
+        st.plotly_chart(fig_pi_over_time(df), use_container_width=True, key="fig_pi_cumul")
+
+    with tab_work:
+        st.plotly_chart(fig_K_over_time(df), use_container_width=True, key="fig_K")
+        st.plotly_chart(
+            fig_hiring_events(df, enable_hiring=enable_hiring_active,
+                              enable_replenish_hiring=enable_replenish_active),
+            use_container_width=True, key="fig_hiring",
+        )
+        st.plotly_chart(
+            fig_firing_events(df, T_review=float(active_key[20])),
+            use_container_width=True, key="fig_firing",
+        )
+
+    with tab_modes:
+        st.plotly_chart(fig_mode_mix_area(df, int(active_key[0])), use_container_width=True, key="fig_modes")
+        st.plotly_chart(fig_trained_capital(df), use_container_width=True, key="fig_trained")
+
+    with tab_wages:
+        st.plotly_chart(fig_wage_histogram(np.array(wages_final)), use_container_width=True, key="fig_wage_hist")
+        st.plotly_chart(
+            fig_wage_vs_mean_output(wages_slice, mean_opw, a_trained_slice),
+            use_container_width=True, key="fig_wage_scatter",
+        )
+        st.plotly_chart(fig_wage_bill_over_time(df), use_container_width=True, key="fig_wage_bill")
+        st.plotly_chart(fig_mean_accum_wage_over_time(df), use_container_width=True, key="fig_accum_wage")
+
+    with tab_het:
+        if active_key[_SIGMA_THETA_IDX] == 0.0:
+            # sigma_theta=0 → render charts with empty/degenerate inputs to preserve 13-plot count
+            st.plotly_chart(fig_theta_histogram(np.array([])), use_container_width=True, key="fig_theta_hist")
+            st.plotly_chart(fig_mean_theta_over_time(df), use_container_width=True, key="fig_mean_theta")
         else:
-            mean_opw = np.array([])
-        a_trained_arr = np.array(a_trained_final[:K_active_final], dtype=bool) if K_active_final > 0 else np.array([], dtype=bool)
-        st.pyplot(fig_wage_vs_mean_output(
-            np.array(wages_final[:K_active_final]),
-            mean_opw,
-            a_trained_arr,
-        ))
+            st.plotly_chart(fig_theta_histogram(np.array(theta_final)), use_container_width=True, key="fig_theta_hist")
+            st.plotly_chart(fig_mean_theta_over_time(df), use_container_width=True, key="fig_mean_theta")
 
-    row6_left, row6_right = st.columns(2)
-    with row6_left:
-        enable_hiring_active = bool(active_key[26])          # index 26 = enable_hiring (unchanged)
-        enable_replenish_active = bool(active_key[27])       # index 27 = enable_replenish_hiring
-        st.pyplot(fig_hiring_events(
-            df,
-            enable_hiring=enable_hiring_active,
-            enable_replenish_hiring=enable_replenish_active,
-        ))
-    with row6_right:
-        st.pyplot(fig_pi_over_time(df))
-
-    row7_left, row7_right = st.columns(2)
-    with row7_left:
-        st.pyplot(fig_mean_accum_wage_over_time(df))
-    # row7_right: placeholder for Phase-2 chart
-
+    # ------------------------------------------------------------------
     # Footer
+    # ------------------------------------------------------------------
     theta_arr = np.array(theta_final)
     wages_arr = np.array(wages_final)
     total_firings = int(df["n_review_fired"].sum()) if "n_review_fired" in df.columns else 0
