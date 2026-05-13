@@ -107,7 +107,7 @@ UNSCALED_PARAMS: tuple[str, ...] = (
     # enable_replenish_hiring/enable_horizon_brute_action_grid: boolean flags.
     # max_hire_period/max_hire_per_step: counts; hire_delay_periods: count.
     # beta-dist-task-attrs: four new non-monetary distribution-shape fields.
-    # Total: 9 SCALED + 31 UNSCALED = 40 FirmParams fields.
+    # Total: 9 SCALED + 33 UNSCALED = 42 FirmParams fields.
     "c_auto_alpha_slope",
     "c_auto_alpha_intercept",
     "belief_alpha",
