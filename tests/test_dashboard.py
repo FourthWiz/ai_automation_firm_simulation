@@ -429,7 +429,11 @@ class TestAppSmoke:
             "scenario_mode", "N", "q_a", "g", "c_auto", "w", "p", "target_margin",
         }
         # FirmParams field → widget key mapping (only where they differ)
-        _FIELD_TO_KEY = {"scenario_mode": "scenario"}
+        _FIELD_TO_KEY = {
+            "scenario_mode": "scenario",
+            "enable_hiring": "hiring_mode",
+            "enable_replenish_hiring": "hiring_mode",
+        }
 
         for field in _PARAM_FIELDS:
             widget_key = _FIELD_TO_KEY.get(field, field)
@@ -461,6 +465,10 @@ class TestAppSmoke:
         """Footer captions contain required strings."""
         from streamlit.testing.v1 import AppTest
         at = AppTest.from_file("app.py", default_timeout=60).run()
+        assert not at.exception
+        at.select_slider(key="T_review").set_value("inf")
+        run_btn = next(b for b in at.button if b.label.endswith("Run simulation"))
+        at = run_btn.click().run()
         assert not at.exception
         caption_values = [c.value for c in at.caption]
         combined = " ".join(caption_values)
