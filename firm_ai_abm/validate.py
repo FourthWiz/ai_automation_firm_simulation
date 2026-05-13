@@ -120,6 +120,8 @@ UNSCALED_PARAMS: tuple[str, ...] = (
     "alpha_concentration",
     "beta_mean",
     "beta_concentration",
+    "dp_prior_alpha",
+    "dp_prior_beta",
 )
 
 

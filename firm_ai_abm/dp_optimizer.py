@@ -43,8 +43,10 @@ _DP_HORIZON_MAX: int = 3
 _DP_GRID_LEVELS: tuple = (0.0, 0.25, 0.5, 0.75, 1.0)
 """5 fractional levels for both fire% and aug% at each planning step."""
 
-_DP_PRIOR_MEAN: float = 0.9
-"""Bayesian prior mean for alpha_hat and beta_hat at t=0 (Beta(9,1) mean)."""
+_DP_PRIOR_MEAN: float = 0.5
+"""Bayesian prior mean fallback (used only when firm.params is unavailable — unreachable in production).
+Prefer firm.params.dp_prior_alpha / dp_prior_beta — this constant exists solely for backward compat.
+Value 0.5 matches the new dp_prior_alpha default; dp_prior_beta defaults to 0.7 in production."""
 
 
 # ---------------------------------------------------------------------------
@@ -98,11 +100,11 @@ def dp_rolling_horizon_strategy(firm, t: int) -> np.ndarray:
         )
 
     # MAJ-8 / CRIT-10: defensive init for posterior arrays only (well-defined
-    # initial value = _DP_PRIOR_MEAN; mirrors what reset() does).
+    # initial value = params.dp_prior_alpha / dp_prior_beta; mirrors what reset() does).
     if firm.alpha_hat is None:
-        firm.alpha_hat = np.full(firm.params.N, _DP_PRIOR_MEAN, dtype=np.float64)
+        firm.alpha_hat = np.full(firm.params.N, firm.params.dp_prior_alpha, dtype=np.float64)
     if firm.beta_hat is None:
-        firm.beta_hat = np.full(firm.params.N, _DP_PRIOR_MEAN, dtype=np.float64)
+        firm.beta_hat = np.full(firm.params.N, firm.params.dp_prior_beta, dtype=np.float64)
 
     # Bayesian update: observe true alpha/beta for tasks in T/A mode respectively.
     _update_posteriors(firm)
