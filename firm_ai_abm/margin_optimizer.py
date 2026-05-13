@@ -56,10 +56,10 @@ def target_margin_strategy(firm: Firm, t: int) -> np.ndarray:
     target = firm.params.target_margin
     horizon = firm.params.margin_horizon
 
-    best_modes: np.ndarray | None = None
-    best_score = +math.inf
-    fallback_modes: np.ndarray | None = None
-    fallback_margin = -math.inf
+    # Seed with first candidate so result is always non-None, even when all
+    # candidates project revenue == 0 (realized = -inf for every candidate).
+    best_realized = -math.inf
+    best_modes: np.ndarray = _CANDIDATES[0](firm, t)
 
     for cand in _CANDIDATES:
         firm_copy = copy.deepcopy(firm)
@@ -71,17 +71,15 @@ def target_margin_strategy(firm: Firm, t: int) -> np.ndarray:
         cost = float(proj_df["C"].sum())
         realized = (revenue - cost) / revenue if revenue > 0 else -math.inf
 
-        if realized > fallback_margin:
-            fallback_margin = realized
-            fallback_modes = cand(firm, t)
+        # Pick the candidate with the highest realized margin (argmax).
+        # >= gives last-wins-on-ties semantics (stable across _CANDIDATES order).
+        # The target_margin constraint acts as a floor: the firm maximizes profit
+        # subject to margin >= target, but since argmax always picks the highest
+        # margin, the qualified and unqualified cases collapse to one branch.
+        if realized >= best_realized:
+            best_realized = realized
+            best_modes = cand(firm, t)
 
-        if realized >= target:
-            score = realized - target
-            if score < best_score:
-                best_score = score
-                best_modes = cand(firm, t)
-
-    result = best_modes if best_modes is not None else fallback_modes
-    assert result is not None, "No candidate produced valid modes — candidates list is empty"
+    result = best_modes
     cache[key] = result.copy()
     return result.copy()

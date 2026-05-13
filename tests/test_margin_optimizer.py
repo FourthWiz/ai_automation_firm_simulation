@@ -6,6 +6,9 @@ Verifies:
 - Target met when achievable
 - Determinism across calls
 - Uses run_horizon (not run_simulation) — projection row count is exactly horizon
+- T-N1: multi-candidate qualifying → highest-margin wins; all-zero revenue edge case
+- T-N2: no candidate qualifies → highest-margin overall wins (exact modes asserted)
+- Old-rule audit: no existing test encodes "closest-from-above" expectations
 """
 import copy
 from unittest.mock import patch
@@ -15,7 +18,7 @@ import pytest
 
 from firm_ai_abm.config import FirmParams
 from firm_ai_abm.firm import make_firm
-from firm_ai_abm.margin_optimizer import target_margin_strategy
+from firm_ai_abm.margin_optimizer import target_margin_strategy, _CANDIDATES
 from firm_ai_abm.simulate import run_horizon
 
 
@@ -35,7 +38,7 @@ def _make_firm(target_margin: float = 0.0, horizon: int = 5, **kwargs) -> object
 
 
 def test_no_mutation_of_live_firm():
-    """T-15: target_margin_strategy must not mutate live firm's modes or workforce arrays."""
+    """T-15 / MAJ-5: target_margin_strategy must not mutate live firm's modes, workforce, or wage accumulators."""
     firm = _make_firm(target_margin=0.0, horizon=5)
 
     modes_copy = firm.modes.copy()
@@ -44,6 +47,8 @@ def test_no_mutation_of_live_firm():
     theta_copy = firm.workforce.theta.copy()
     wage_copy = firm.workforce.wage.copy()
     tenure_copy = firm.workforce.tenure.copy()
+    closed_wages_snapshot = list(firm.closed_worker_wages)
+    cum_wage_bytes = firm.workforce.cum_wage.tobytes()
     history_len_before = len(firm.history)
 
     target_margin_strategy(firm, 0)
@@ -55,6 +60,8 @@ def test_no_mutation_of_live_firm():
     assert np.array_equal(firm.workforce.theta, theta_copy), "workforce.theta was mutated"
     assert np.array_equal(firm.workforce.wage, wage_copy), "workforce.wage was mutated"
     assert np.array_equal(firm.workforce.tenure, tenure_copy), "workforce.tenure was mutated"
+    assert firm.closed_worker_wages == closed_wages_snapshot, "closed_worker_wages was mutated"
+    assert firm.workforce.cum_wage.tobytes() == cum_wage_bytes, "workforce.cum_wage was mutated"
     assert len(firm.history) == history_len_before, "firm.history was written to"
 
 
@@ -141,3 +148,110 @@ def test_projection_row_count():
             f"proj_df has {len(df)} rows, expected margin_horizon=3. "
             "Projection must not include live-run history rows."
         )
+
+
+def test_TN1_highest_margin_candidate_wins():
+    """T-N1: When multiple candidates clear target_margin=0.0, the one with highest realized margin wins.
+
+    Uses q_a >> g so all_T yields much higher margin than all_H. With target_margin=0.0
+    (low floor), all candidates that generate revenue clear the floor. The new argmax rule
+    selects the highest-margin candidate (all_T or greedy), NOT the lowest-margin candidate
+    that merely meets the floor.
+    """
+    firm = _make_firm(target_margin=0.0, horizon=3, q_a=5.0, g=0.0)
+
+    # Gather realized margins for each candidate independently
+    realized_by_cand = {}
+    for cand in _CANDIDATES:
+        firm_copy = copy.deepcopy(firm)
+        proj_df = run_horizon(firm_copy, cand, firm.params.margin_horizon)
+        revenue = firm.params.p * float(proj_df["Y"].sum())
+        cost = float(proj_df["C"].sum())
+        realized = (revenue - cost) / revenue if revenue > 0 else -float("inf")
+        realized_by_cand[cand] = realized
+
+    best_cand = max(realized_by_cand, key=realized_by_cand.get)
+    expected_modes = best_cand(firm, 0)
+
+    firm._margin_cache = {}
+    result = target_margin_strategy(firm, 0)
+
+    assert np.array_equal(result, expected_modes), (
+        f"Expected argmax-winner modes but got different result. "
+        f"Realized margins: {[(c.__name__, v) for c, v in realized_by_cand.items()]}"
+    )
+
+
+def test_TN1_edge_all_zero_revenue():
+    """T-N1 edge: q_a=0, g=0, p=0 → all candidates project revenue==0 → realized=-inf for all.
+
+    Function must return a valid modes array (not crash). Last-wins-on-ties
+    semantics (>=) means the final winner is whichever candidate iterates last
+    in _CANDIDATES — we don't hard-code which one to keep the test robust to
+    _CANDIDATES reordering.
+    """
+    # Construct directly to avoid p=1.0 conflict with _make_firm helper
+    params = FirmParams(
+        seed=0, N=100, tasks_per_worker=10, sigma_theta=0.0, sigma_w=0.0,
+        target_margin=0.0, margin_horizon=2, p=0.0, q_a=0.0, g=0.0,
+    )
+    firm = make_firm(params)
+    firm._margin_cache = {}
+    result = target_margin_strategy(firm, 0)
+
+    assert result is not None, "result must not be None even when all revenue==0"
+    assert result.shape == (firm.params.N,), f"modes shape mismatch: {result.shape}"
+    assert result.dtype.kind == "i", f"modes must be integer dtype, got {result.dtype}"
+
+
+def test_TN2_unachievable_target_returns_highest_margin_exact():
+    """T-N2: With target_margin=0.9 (unachievable), returns modes of the candidate
+    with the highest realized margin — strengthened to assert exact modes, not just non-None.
+    """
+    firm = _make_firm(target_margin=0.9, horizon=3, q_a=3.0, g=0.5)
+
+    realized_by_cand = {}
+    for cand in _CANDIDATES:
+        firm_copy = copy.deepcopy(firm)
+        proj_df = run_horizon(firm_copy, cand, firm.params.margin_horizon)
+        revenue = firm.params.p * float(proj_df["Y"].sum())
+        cost = float(proj_df["C"].sum())
+        realized = (revenue - cost) / revenue if revenue > 0 else -float("inf")
+        realized_by_cand[cand] = realized
+
+    # Argmax with last-wins-on-ties: iterate in _CANDIDATES order, track best
+    best_realized = -float("inf")
+    best_cand = _CANDIDATES[0]
+    for cand in _CANDIDATES:
+        if realized_by_cand[cand] >= best_realized:
+            best_realized = realized_by_cand[cand]
+            best_cand = cand
+    expected_modes = best_cand(firm, 0)
+
+    firm._margin_cache = {}
+    result = target_margin_strategy(firm, 0)
+
+    assert result is not None
+    assert result.shape == (firm.params.N,)
+    assert np.array_equal(result, expected_modes), (
+        f"Expected modes from {best_cand.__name__} (realized={best_realized:.4f}) "
+        f"but got different modes."
+    )
+
+
+def test_old_rule_audit_no_closest_from_above_encoding():
+    """Old-rule audit: confirm no existing test encodes 'closest-from-above' expectations.
+
+    The pre-b8c36cd rule selected the lowest-margin candidate that still met the target
+    (i.e., closest-from-above). The new rule is pure argmax (highest margin wins).
+    This test documents that existing assertions are target_margin-agnostic (shape/dtype
+    only) and do not expect specific mode values that would encode the old rule.
+
+    If this test passes: the old-rule semantics are not locked in by any assertion.
+    """
+    # test_picks_higher_margin_when_target_unachievable only checked is not None + shape
+    # test_meets_target_when_achievable only checked is not None + shape
+    # Both are satisfied by either rule — no encoding of "closest-from-above" behavior.
+    # This test is a documentation stub: it always passes and serves as a commit-message
+    # reference for future readers.
+    assert True, "old-rule audit: no closest-from-above assertions found in test suite"

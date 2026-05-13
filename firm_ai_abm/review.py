@@ -222,6 +222,10 @@ def apply_firings(
         return firm.workforce, output_per_worker, aug_cost_per_worker
 
     wf = firm.workforce
+
+    # Snapshot fired workers' cumulative wages BEFORE shrinking the SoA arrays.
+    firm.closed_worker_wages.extend(wf.cum_wage[fire_indices].tolist())
+
     keep_mask = np.ones(wf.K, dtype=bool)
     keep_mask[fire_indices] = False
 
@@ -236,6 +240,7 @@ def apply_firings(
         a_trained=wf.a_trained[keep_mask].copy(),
         tenure=wf.tenure[keep_mask].copy(),
         hire_t=wf.hire_t[keep_mask].copy(),
+        cum_wage=wf.cum_wage[keep_mask].copy(),
         a_training_in_progress=surv_aip,
     )
 
@@ -247,6 +252,7 @@ def apply_firings(
         a_trained=surv.a_trained[order],
         tenure=surv.tenure[order],
         hire_t=surv.hire_t[order],
+        cum_wage=surv.cum_wage[order],
         a_training_in_progress=new_aip,
     )
 
@@ -312,6 +318,8 @@ def replace_to_target(
         a_trained=np.concatenate([wf.a_trained, repl.a_trained]),
         tenure=np.concatenate([wf.tenure, repl.tenure]),
         hire_t=np.concatenate([wf.hire_t, repl.hire_t]),
+        # New hires (repl) get cum_wage=0 via Workforce.__post_init__; concatenate preserves that
+        cum_wage=np.concatenate([wf.cum_wage, repl.cum_wage]),
         a_training_in_progress=combined_aip,
     )
 
@@ -323,6 +331,7 @@ def replace_to_target(
         a_trained=combined.a_trained[order],
         tenure=combined.tenure[order],
         hire_t=combined.hire_t[order],
+        cum_wage=combined.cum_wage[order],
         a_training_in_progress=new_aip,
     )
 

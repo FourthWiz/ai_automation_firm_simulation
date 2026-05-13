@@ -251,6 +251,19 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
         C = task_costs + wage_bill + params.F + period_adj + period_review_fire_cost + period_hire_cost
         pi = params.p * Y - C
 
+        # Step 8.5: accumulate wages for ALL active workers (while employed, regardless of
+        # mode-assignment). Diverges from wage_bill which uses assigned-only for all_T parity.
+        # cum_wage is run-state: zeroed on firm.reset(), snapshotted in apply_firings on fire.
+        if firm.workforce.K > 0:
+            firm.workforce.cum_wage += firm.workforce.wage
+
+        # mean_accum_wage: (sum of terminal cum_wage for all fired workers
+        #                   + sum of live cum_wage for current workforce)
+        #                  / total ever-worked-worker count
+        ever_worked_wages = firm.closed_worker_wages + firm.workforce.cum_wage.tolist()
+        n_ever_worked = len(ever_worked_wages)
+        mean_accum_wage = sum(ever_worked_wages) / n_ever_worked if n_ever_worked > 0 else float("nan")
+
         # Step 11: append to local history (NOT firm.history)
         K_active = int(active.size)
         local_history.append({
@@ -270,6 +283,8 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
             "n_review_fired": n_review_fired_period,
             "c_train_lost": c_train_lost_period,
             "n_hired": n_hired_period,
+            "mean_accum_wage": mean_accum_wage,
+            "ever_worked_count": n_ever_worked,
         })
 
         # -------------------------------------------------------------------

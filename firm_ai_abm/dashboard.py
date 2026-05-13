@@ -17,6 +17,7 @@ import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.figure
+import matplotlib.ticker
 
 from firm_ai_abm.production import Mode
 
@@ -456,5 +457,46 @@ def fig_hiring_events(
     ax.set_ylabel("workers hired")
     ax.set_title("Hiring Events Over Time")
     ax.grid(alpha=0.3, axis="y")
+    fig.tight_layout()
+    return fig
+
+
+def fig_mean_accum_wage_over_time(df: pd.DataFrame) -> matplotlib.figure.Figure:
+    """Mean accumulated wages per ever-worked worker, with secondary axis for headcount.
+
+    Left axis: mean_accum_wage over time (#DD8452, orange).
+    Right axis: ever_worked_count (cumulative distinct workers who held a slot).
+    Handles all-NaN gracefully (renders empty axes with explanatory note).
+
+    Input:
+        df: run_simulation DataFrame with columns 't', 'mean_accum_wage', 'ever_worked_count'.
+    Output:
+        Figure with one or two Axes (left + optional right). No disk I/O.
+    """
+    col_wage = df.get("mean_accum_wage", pd.Series(float("nan"), index=df.index))
+    col_count = df.get("ever_worked_count", pd.Series(0, index=df.index))
+
+    fig, ax = plt.subplots(figsize=(5, 3))
+
+    all_nan = col_wage.isna().all()
+    if all_nan:
+        ax.text(0.5, 0.5, "no workers ever active",
+                transform=ax.transAxes, ha="center", va="center",
+                fontsize=9, color="gray")
+    else:
+        ax.plot(df["t"], col_wage, color="#DD8452", linewidth=1.5, label="mean accum. wage")
+        ax.legend(loc="upper left", frameon=False, fontsize=8)
+
+        ax2 = ax.twinx()
+        ax2.plot(df["t"], col_count, color="#8172B3", linewidth=1.0,
+                 linestyle="--", alpha=0.7, label="ever worked")
+        ax2.yaxis.set_major_locator(matplotlib.ticker.MaxNLocator(integer=True))
+        ax2.set_ylabel("ever-worked count", fontsize=8)
+        ax2.legend(loc="upper right", frameon=False, fontsize=8)
+
+    ax.set_xlabel("period")
+    ax.set_ylabel("cumulative wages")
+    ax.set_title("Mean Accumulated Wages per Ever-Worked Worker")
+    ax.grid(alpha=0.3)
     fig.tight_layout()
     return fig
