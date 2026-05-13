@@ -55,6 +55,8 @@ from firm_ai_abm.dashboard import (
     fig_wage_vs_mean_output,
     fig_hiring_events,
     fig_mean_accum_wage_over_time,
+    fig_alpha_histogram,
+    fig_beta_histogram,
 )
 from firm_ai_abm.production import Mode
 
@@ -190,7 +192,8 @@ def run_cached(params_key: tuple, strategy_name: str) -> tuple:
         strategy_name: key into _STRATEGY_REGISTRY.
 
     Returns:
-        7-tuple: (df, theta_final, wages_final, K_max, call_id, output_per_worker, a_trained_final)
+        9-tuple: (df, theta_final, wages_final, K_max, call_id, output_per_worker,
+                  a_trained_final, alpha_arr, beta_arr)
           df:               run_simulation DataFrame (T rows × 13+ columns)
           theta_final:      list[float] — firm.workforce.theta after final period
           wages_final:      list[float] — firm.workforce.wage after final period
@@ -199,6 +202,8 @@ def run_cached(params_key: tuple, strategy_name: str) -> tuple:
                             identical for cache hits (same cached value returned)
           output_per_worker: list[list[float]] — firm.output_per_worker.tolist()
           a_trained_final:  list[bool] — firm.workforce.a_trained.tolist()
+          alpha_arr:        list[float] — firm.alpha.tolist() (sampled at make_firm; immutable)
+          beta_arr:         list[float] — firm.beta.tolist() (sampled at make_firm; immutable)
 
     Cache-hit observability: a monotonic timestamp (time.monotonic_ns()) is
         captured at actual computation time and returned as the 5th element.
@@ -221,7 +226,9 @@ def run_cached(params_key: tuple, strategy_name: str) -> tuple:
     K_max = params.N // params.tasks_per_worker
     output_per_worker = firm.output_per_worker.tolist()
     a_trained_final = firm.workforce.a_trained.tolist()
-    return df, theta_final, wages_final, K_max, computed_at, output_per_worker, a_trained_final
+    alpha_arr = firm.alpha.tolist()
+    beta_arr = firm.beta.tolist()
+    return df, theta_final, wages_final, K_max, computed_at, output_per_worker, a_trained_final, alpha_arr, beta_arr
 
 
 # ---------------------------------------------------------------------------
@@ -644,7 +651,7 @@ def main() -> None:
         spinner_ctx = st.spinner("Simulating…")
         spinner_ctx.__enter__()
     try:
-        df, theta_final, wages_final, K_max, computed_at, output_per_worker_list, a_trained_final = run_cached(active_key, active_strategy)
+        df, theta_final, wages_final, K_max, computed_at, output_per_worker_list, a_trained_final, alpha_list, beta_list = run_cached(active_key, active_strategy)
     except Exception as e:
         if run_clicked:
             spinner_ctx.__exit__(None, None, None)
@@ -729,6 +736,14 @@ def main() -> None:
     with tab_modes:
         st.plotly_chart(fig_mode_mix_area(df, int(active_key[0])), width="stretch", key="fig_modes")
         st.plotly_chart(fig_trained_capital(df), width="stretch", key="fig_trained")
+        st.plotly_chart(
+            fig_alpha_histogram(np.array(alpha_list)),
+            width="stretch", key="fig_alpha_hist",
+        )
+        st.plotly_chart(
+            fig_beta_histogram(np.array(beta_list)),
+            width="stretch", key="fig_beta_hist",
+        )
 
     with tab_wages:
         st.plotly_chart(fig_wage_histogram(np.array(wages_final)), width="stretch", key="fig_wage_hist")
