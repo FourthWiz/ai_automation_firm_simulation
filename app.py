@@ -685,42 +685,42 @@ def main() -> None:
     ])
 
     with tab_out:
-        st.plotly_chart(fig_pi_per_period_over_time(df), use_container_width=True, key="fig_pi_period")
-        st.plotly_chart(fig_pi_over_time(df), use_container_width=True, key="fig_pi_cumul")
+        st.plotly_chart(fig_pi_per_period_over_time(df), width="stretch", key="fig_pi_period")
+        st.plotly_chart(fig_pi_over_time(df), width="stretch", key="fig_pi_cumul")
 
     with tab_work:
-        st.plotly_chart(fig_K_over_time(df), use_container_width=True, key="fig_K")
+        st.plotly_chart(fig_K_over_time(df), width="stretch", key="fig_K")
         st.plotly_chart(
             fig_hiring_events(df, enable_hiring=enable_hiring_active,
                               enable_replenish_hiring=enable_replenish_active),
-            use_container_width=True, key="fig_hiring",
+            width="stretch", key="fig_hiring",
         )
         st.plotly_chart(
             fig_firing_events(df, T_review=float(active_key[20])),
-            use_container_width=True, key="fig_firing",
+            width="stretch", key="fig_firing",
         )
 
     with tab_modes:
-        st.plotly_chart(fig_mode_mix_area(df, int(active_key[0])), use_container_width=True, key="fig_modes")
-        st.plotly_chart(fig_trained_capital(df), use_container_width=True, key="fig_trained")
+        st.plotly_chart(fig_mode_mix_area(df, int(active_key[0])), width="stretch", key="fig_modes")
+        st.plotly_chart(fig_trained_capital(df), width="stretch", key="fig_trained")
 
     with tab_wages:
-        st.plotly_chart(fig_wage_histogram(np.array(wages_final)), use_container_width=True, key="fig_wage_hist")
+        st.plotly_chart(fig_wage_histogram(np.array(wages_final)), width="stretch", key="fig_wage_hist")
         st.plotly_chart(
             fig_wage_vs_mean_output(wages_slice, mean_opw, a_trained_slice),
-            use_container_width=True, key="fig_wage_scatter",
+            width="stretch", key="fig_wage_scatter",
         )
-        st.plotly_chart(fig_wage_bill_over_time(df), use_container_width=True, key="fig_wage_bill")
-        st.plotly_chart(fig_mean_accum_wage_over_time(df), use_container_width=True, key="fig_accum_wage")
+        st.plotly_chart(fig_wage_bill_over_time(df), width="stretch", key="fig_wage_bill")
+        st.plotly_chart(fig_mean_accum_wage_over_time(df), width="stretch", key="fig_accum_wage")
 
     with tab_het:
         if active_key[_SIGMA_THETA_IDX] == 0.0:
             # sigma_theta=0 → render charts with empty/degenerate inputs to preserve 13-plot count
-            st.plotly_chart(fig_theta_histogram(np.array([])), use_container_width=True, key="fig_theta_hist")
-            st.plotly_chart(fig_mean_theta_over_time(df), use_container_width=True, key="fig_mean_theta")
+            st.plotly_chart(fig_theta_histogram(np.array([])), width="stretch", key="fig_theta_hist")
+            st.plotly_chart(fig_mean_theta_over_time(df), width="stretch", key="fig_mean_theta")
         else:
-            st.plotly_chart(fig_theta_histogram(np.array(theta_final)), use_container_width=True, key="fig_theta_hist")
-            st.plotly_chart(fig_mean_theta_over_time(df), use_container_width=True, key="fig_mean_theta")
+            st.plotly_chart(fig_theta_histogram(np.array(theta_final)), width="stretch", key="fig_theta_hist")
+            st.plotly_chart(fig_mean_theta_over_time(df), width="stretch", key="fig_mean_theta")
 
     # ------------------------------------------------------------------
     # Footer
