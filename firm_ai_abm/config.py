@@ -77,3 +77,14 @@ class FirmParams:
     c_auto_alpha_slope: float = 0.0       # slope of linear alpha-dependence in per-task auto cost (D-01)
     c_auto_alpha_intercept: float = 0.0   # intercept of linear alpha-dependence (D-01)
     belief_alpha: float | None = None     # prior mean E[alpha] for T-mode scoring; None = dormant (D-02, D-05)
+
+    # Task-attribute distributions (beta-dist-task-attrs)
+    # alpha_i ~ Beta(a, b) with a = alpha_mean * alpha_concentration,
+    #                         b = (1 - alpha_mean) * alpha_concentration.
+    # Default (0.5, 2.0) is the Uniform(0,1) special case (Beta(1,1)) — the
+    # sampler short-circuits to rng.uniform(0,1) on exact equality with these
+    # defaults to preserve byte-identity with Phase 1 parquet fixtures.
+    alpha_mean: float = 0.5
+    alpha_concentration: float = 2.0
+    beta_mean: float = 0.5
+    beta_concentration: float = 2.0
