@@ -53,6 +53,7 @@ from firm_ai_abm.dashboard import (
     fig_wage_histogram,
     fig_wage_vs_mean_output,
     fig_hiring_events,
+    fig_mean_accum_wage_over_time,
 )
 
 # ---------------------------------------------------------------------------
@@ -519,6 +520,11 @@ def main() -> None:
         ))
     with row6_right:
         st.pyplot(fig_pi_over_time(df))
+
+    row7_left, row7_right = st.columns(2)
+    with row7_left:
+        st.pyplot(fig_mean_accum_wage_over_time(df))
+    # row7_right: placeholder for Phase-2 chart
 
     # Footer
     theta_arr = np.array(theta_final)
