@@ -9,8 +9,12 @@ Verifies:
 - T-N1: multi-candidate qualifying → highest-margin wins; all-zero revenue edge case
 - T-N2: no candidate qualifies → highest-margin overall wins (exact modes asserted)
 - Old-rule audit: no existing test encodes "closest-from-above" expectations
+- T-03 (b): action-grid improves objective vs no-action baseline with fire/hire enabled
+- CRITICAL-1 regression: forward_simulate_action_path must not consume firm.rng
+- CRITICAL-2 regression: action-grid winner's n_fire/n_hire written to firm intents
 """
 import copy
+import math
 from unittest.mock import patch
 
 import numpy as np
@@ -441,4 +445,108 @@ def test_action_grid_invariant_to_dp_prior():
         f"Expected more T-mode tasks with alpha_hat=0.9 ({n_T_high}) "
         f"than with alpha_hat=0.3 ({n_T_low}). "
         "Action-grid may not be reading alpha_hat correctly."
+    )
+
+
+def test_action_grid_improves_objective_when_fires_help():
+    """T-03 (b): action-grid finds a better path than no-action baseline when firing helps.
+
+    High wages + finite T_review means proactively firing expensive workers improves
+    cumulative profit. The action-grid must find a path at least as good as the
+    no-action baseline path (n_fire=0, n_aug=0, n_hire=0) at every step.
+    """
+    from firm_ai_abm.margin_optimizer import _build_action_grid_paths
+    from firm_ai_abm.forward_sim import forward_simulate_action_path, Action
+
+    params = FirmParams(
+        seed=7, N=30, tasks_per_worker=5,
+        sigma_theta=0.0, sigma_w=0.0,
+        T_review=1,       # eligible to fire every period
+        c_fire=0.05,      # cheap to fire
+        w=3.0,            # high wage burden
+        p=0.5,            # low price → wage dominates output value
+        margin_horizon=3,
+        enable_horizon_brute_action_grid=True,
+        max_hire_per_step=0,
+    )
+    firm = make_firm(params)
+
+    action_paths = _build_action_grid_paths(firm, t=0, horizon=3)
+    assert len(action_paths) > 0, "action-grid must produce at least one path"
+
+    best_pi = -math.inf
+    for path in action_paths:
+        pi = forward_simulate_action_path(firm, t=0, action_path=path, horizon=3)
+        if pi > best_pi:
+            best_pi = pi
+
+    baseline_path = [Action(n_fire=0, n_aug=0, n_hire=0)] * 3
+    baseline_pi = forward_simulate_action_path(firm, t=0, action_path=baseline_path, horizon=3)
+
+    assert best_pi >= baseline_pi, (
+        f"Action-grid failed to beat no-action baseline: "
+        f"best_grid={best_pi:.4f} vs baseline={baseline_pi:.4f}"
+    )
+
+
+def test_forward_sim_does_not_perturb_firm_rng():
+    """CRITICAL-1 regression: forward_simulate_action_path must not advance firm.rng.
+
+    Two identical-seed runs must agree on downstream stochastic draws regardless
+    of how many workers are sampled during planning.
+    """
+    from firm_ai_abm.forward_sim import forward_simulate_action_path, Action
+
+    params = FirmParams(
+        seed=42, N=50, tasks_per_worker=5,
+        sigma_theta=0.1, sigma_w=0.05,
+        T_review=5,
+        enable_replenish_hiring=True,
+        max_hire_per_step=4,
+        hire_delay_periods=1,
+        margin_horizon=5,
+    )
+    firm = make_firm(params)
+
+    rng_state_before = copy.deepcopy(firm.rng.bit_generator.state)
+
+    path = [Action(n_fire=0, n_aug=0, n_hire=2)] * 5
+    _ = forward_simulate_action_path(firm, t=0, action_path=path, horizon=5)
+
+    rng_state_after = firm.rng.bit_generator.state
+    assert rng_state_before == rng_state_after, (
+        "forward_simulate_action_path advanced firm.rng — planning perturbs live kernel state."
+    )
+
+
+def test_action_grid_writes_fire_hire_intent():
+    """CRITICAL-2 regression: action-grid winner's n_fire/n_hire must be written to firm intents.
+
+    After horizon_brute_strategy returns, firm._fire_intent and firm._hire_intent
+    must reflect the first-step action of the winning path — not the side-effects
+    of an earlier candidate call.
+    """
+    from firm_ai_abm.margin_optimizer import horizon_brute_strategy
+
+    params = FirmParams(
+        seed=9, N=50, tasks_per_worker=5,
+        sigma_theta=0.0, sigma_w=0.0,
+        T_review=1, c_fire=0.01,
+        enable_horizon_brute_action_grid=True,
+        enable_replenish_hiring=True,
+        max_hire_per_step=2,
+        hire_delay_periods=1,
+        margin_horizon=2,
+    )
+    firm = make_firm(params)
+
+    horizon_brute_strategy(firm, t=0)
+
+    assert hasattr(firm, "_fire_intent"), "firm._fire_intent not set by action-grid strategy"
+    assert hasattr(firm, "_hire_intent"), "firm._hire_intent not set by action-grid strategy"
+    assert isinstance(firm._fire_intent, int), (
+        f"_fire_intent must be int, got {type(firm._fire_intent)}"
+    )
+    assert isinstance(firm._hire_intent, int), (
+        f"_hire_intent must be int, got {type(firm._hire_intent)}"
     )

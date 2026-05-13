@@ -191,7 +191,12 @@ def test_hire_cost_timing():
     We proxy this by comparing partial-horizon profit sums:
       horizon=1 and horizon=2 should NOT yet show the hire cost difference;
       horizon=3 (includes s=2) SHOULD show it.
+
+    The firm is trimmed to K_max-3 workers so there is room for n_hire=2 to drain.
+    (At K_max, no workers can be placed and no cost would be charged — correct behavior
+    per MINOR-1 fix; but to test timing we need an uncapped scenario.)
     """
+    from firm_ai_abm.workers import Workforce
     hire_delay = 2
     c_hire = 1.5
     firm = _make_firm(
@@ -200,6 +205,23 @@ def test_hire_cost_timing():
         c_hire=c_hire,
         seed=3, N=50,
     )
+    # Trim to K_max-3 so n_hire=2 workers can actually drain (not capped by K_max)
+    K_keep = firm.workforce.K - 3
+    wf = firm.workforce
+    firm.workforce = Workforce(
+        theta=wf.theta[:K_keep],
+        wage=wf.wage[:K_keep],
+        a_trained=wf.a_trained[:K_keep],
+        tenure=wf.tenure[:K_keep],
+        hire_t=wf.hire_t[:K_keep],
+        cum_wage=wf.cum_wage[:K_keep],
+        a_training_in_progress=(
+            wf.a_training_in_progress[:K_keep]
+            if wf.a_training_in_progress is not None else None
+        ),
+    )
+    firm._output_per_worker_so_far = np.zeros((0, firm.workforce.K), dtype=np.float64)
+    firm._aug_cost_per_worker_so_far = np.zeros((0, firm.workforce.K), dtype=np.float64)
     firm_copy = copy.deepcopy(firm)
 
     n_hire = 2
