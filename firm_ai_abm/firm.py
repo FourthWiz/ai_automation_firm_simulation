@@ -56,17 +56,19 @@ class Firm:
 
 
 def validate_hiring_params(params: FirmParams) -> None:
-    """Validate replenish-hiring params. No-op when enable_replenish_hiring=False.
+    """Validate hiring params. No-op when neither hiring mode is enabled.
 
     Called from make_firm BEFORE workforce sampling (fail-fast at construction).
     Mutual exclusion: enable_hiring and enable_replenish_hiring cannot both be True.
+    hire_delay_periods >= 1 and max_hire_period >= 0 are enforced whenever EITHER
+    hiring mode is on — delay applies to both paths after D-02.
     If a user mutates firm.params post-construction (anti-pattern), this check does
     not re-fire — the bypass is on them (R-05). Add a defensive re-check at
     run_horizon entry if that risk materializes.
     """
-    if not params.enable_replenish_hiring:
+    if not (params.enable_hiring or params.enable_replenish_hiring):
         return
-    if params.enable_hiring:
+    if params.enable_hiring and params.enable_replenish_hiring:
         raise ValueError(
             "enable_hiring and enable_replenish_hiring are mutually exclusive; "
             "pick exactly one hiring path"

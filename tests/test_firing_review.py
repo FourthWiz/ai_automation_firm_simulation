@@ -764,19 +764,22 @@ def test_low_price_triggers_firings():
 
 
 def test_enable_hiring_restores_headcount():
-    """Smoke test: enable_hiring=True restores firm.workforce.K to K_max (== K0) after firings.
+    """Smoke test: enable_hiring=True restores headcount after firings, with hire_delay_periods=1.
+
+    After D-02, hires are queued at the fire period and drained at t+hire_delay_periods.
+    n_hired[t_fire] == 0; n_hired[t_fire+1] > 0 (delay realized).
 
     With the K*-based hire target, under these params (p=0.22, q_h=1.0, w=1.0,
     F=5.0, firing_threshold=0.0, all_H) the denominator is 0.22*5 - 1 - 0 - 0 = 0.10,
     giving K* = ceil(5/0.10) = 50, which is capped at K_max = N // tasks_per_worker
-    = 100 // 5 = 20. K_max coincides with K0 by construction, so the assertion
-    firm.workforce.K == K0 still holds — but the reason is the K_max cap, not a
-    literal K0 target.
+    = 100 // 5 = 20. K_max coincides with K0 by construction.
 
     Recipe: same as test_low_price_triggers_firings plus enable_hiring=True.
     Assertions:
-      - n_hired sum > 0 (hires occurred)
-      - firm.workforce.K == firm.K0 (== K_max) after run
+      - n_hired sum > 0 (hires occurred, just delayed by 1 period)
+      - at first fire period t_fire: n_hired[t_fire] == 0 (delay not yet realized)
+      - at t_fire+1: n_hired[t_fire+1] > 0 (drain realized)
+      - firm.workforce.K <= K0 after run
       - pi shows no runaway negative cost (sanity)
     """
     params = FirmParams(
@@ -785,6 +788,7 @@ def test_enable_hiring_restores_headcount():
         p=0.22, seed=0,
         sigma_theta=0.2, sigma_w=0.05,
         enable_hiring=True,
+        hire_delay_periods=1,
     )
     firm = make_firm(params)
     K0 = firm.K0
@@ -794,8 +798,24 @@ def test_enable_hiring_restores_headcount():
         "enable_hiring=True with low p should produce hires; got 0"
     )
 
-    # Under K*-based hiring, K settles at the optimal hire target, which may be
-    # well below K0 when heterogeneous workers drive up survivor E[output].
+    # Verify delay semantics: at first fire period, no same-period hires.
+    fire_periods = df[df["n_review_fired"] > 0]["t"].values
+    if len(fire_periods) > 0:
+        t_fire = int(fire_periods[0])
+        n_hired_at_fire = int(df[df["t"] == t_fire]["n_hired"].iloc[0])
+        assert n_hired_at_fire == 0, (
+            f"Expected n_hired=0 at fire period t={t_fire} (delay not yet realized); "
+            f"got {n_hired_at_fire}. hire_delay_periods={params.hire_delay_periods}"
+        )
+        drain_rows = df[df["t"] == t_fire + 1]
+        if len(drain_rows) > 0:
+            n_hired_at_drain = int(drain_rows["n_hired"].iloc[0])
+            assert n_hired_at_drain > 0, (
+                f"Expected n_hired>0 at drain period t={t_fire+1}; "
+                f"got {n_hired_at_drain}."
+            )
+
+    # Under K*-based hiring, K settles at the optimal hire target.
     # The bound that always holds: K <= K_max (== K0 by construction in make_firm).
     assert firm.workforce.K > 0, (
         f"Firm should still have workers after run; got K={firm.workforce.K}"
@@ -1126,6 +1146,7 @@ def test_hiring_oscillation_bounded():
         sigma_theta=0.2,
         sigma_w=0.05,
         enable_hiring=True,
+        hire_delay_periods=1,  # pin explicitly; delay semantics: hires drain at t+1
     )
     K0 = params.N // params.tasks_per_worker  # 20
     firm = make_firm(params)
@@ -1162,9 +1183,11 @@ def test_hiring_oscillation_bounded():
     for v in zero_k_periods:
         cur = cur + 1 if v else 0
         max_zero_run = max(max_zero_run, cur)
+    # With hire_delay_periods=1, K_active==0 is allowed for 1 period (the fire
+    # period itself). Hires drain at t+1, so K_active recovers by the next period.
     assert max_zero_run <= 1, (
         f"Workforce stuck at K_active=0 for {max_zero_run} consecutive periods. "
-        f"enable_hiring should restore headcount within the same period."
+        f"enable_hiring with hire_delay_periods=1 should restore headcount within 1 period delay."
     )
 
 
