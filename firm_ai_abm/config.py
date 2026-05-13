@@ -69,6 +69,8 @@ class FirmParams:
     hire_delay_periods: int = 1            # periods to wait before hiring back fired workers (>=1)
     max_hire_per_step: int = 0             # planning action-grid hire cap; 0 = hire-axis degenerates to {0} (byte-parity)
                                            # distinct from max_hire_period (kernel drain-cap) — this controls the planner grid
+    enable_horizon_brute_action_grid: bool = False  # when True, horizon_brute_strategy searches full (n_fire,n_aug,n_hire) action grid
+                                                     # when False (default), falls back to 5-candidate run_horizon path (byte-parity)
 
     # Alpha-dependent automation cost (D-01, D-02, D-05)
     # When belief_alpha is None (default), all three fields are dormant: cost_vec uses the flat

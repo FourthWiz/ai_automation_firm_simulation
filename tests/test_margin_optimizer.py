@@ -483,8 +483,8 @@ def test_action_grid_improves_objective_when_fires_help():
     baseline_path = [Action(n_fire=0, n_aug=0, n_hire=0)] * 3
     baseline_pi = forward_simulate_action_path(firm, t=0, action_path=baseline_path, horizon=3)
 
-    assert best_pi >= baseline_pi, (
-        f"Action-grid failed to beat no-action baseline: "
+    assert best_pi > baseline_pi, (
+        f"Action-grid failed to strictly beat no-action baseline: "
         f"best_grid={best_pi:.4f} vs baseline={baseline_pi:.4f}"
     )
 
@@ -525,22 +525,26 @@ def test_action_grid_writes_fire_hire_intent():
     After horizon_brute_strategy returns, firm._fire_intent and firm._hire_intent
     must reflect the first-step action of the winning path — not the side-effects
     of an earlier candidate call.
+
+    Uses a high-wage / cheap-fire scenario where firing is strictly optimal so that
+    the action-grid must choose n_fire > 0 and the intent value check is non-trivial.
     """
     from firm_ai_abm.margin_optimizer import horizon_brute_strategy
 
+    # t=5 with T_review=5: _is_review_period(5, 5) == True, so fire candidates exist.
+    # High wage (3.0) and low price (0.5) make firing strictly optimal at a review period.
     params = FirmParams(
-        seed=9, N=50, tasks_per_worker=5,
+        seed=9, N=30, tasks_per_worker=5,
         sigma_theta=0.0, sigma_w=0.0,
-        T_review=1, c_fire=0.01,
+        T_review=5, c_fire=0.05,
+        w=3.0, p=0.5,
         enable_horizon_brute_action_grid=True,
-        enable_replenish_hiring=True,
-        max_hire_per_step=2,
-        hire_delay_periods=1,
+        max_hire_per_step=0,
         margin_horizon=2,
     )
     firm = make_firm(params)
 
-    horizon_brute_strategy(firm, t=0)
+    horizon_brute_strategy(firm, t=5)
 
     assert hasattr(firm, "_fire_intent"), "firm._fire_intent not set by action-grid strategy"
     assert hasattr(firm, "_hire_intent"), "firm._hire_intent not set by action-grid strategy"
@@ -549,4 +553,10 @@ def test_action_grid_writes_fire_hire_intent():
     )
     assert isinstance(firm._hire_intent, int), (
         f"_hire_intent must be int, got {type(firm._hire_intent)}"
+    )
+    # Verify the CORRECT value was written — not a silent 0.
+    # At t=5 (review period), high wage / cheap fire means the grid must pick n_fire > 0.
+    assert firm._fire_intent > 0, (
+        f"Expected _fire_intent > 0 in high-wage/cheap-fire scenario at t=5, got {firm._fire_intent}. "
+        "Action-grid may be writing 0/0 unconditionally (CRITICAL-2 regression)."
     )
