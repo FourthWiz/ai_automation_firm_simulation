@@ -1,12 +1,15 @@
 """Regenerate requirements.txt from pyproject.toml dashboard optional-deps.
 
+Uses tomllib (stdlib, Python 3.11+) to parse pyproject.toml safely,
+including PEP 508 environment markers and quoted commas.
+
 Usage:
   python scripts/sync_requirements.py          # write requirements.txt in place
   python scripts/sync_requirements.py --check  # dry-run; exit 1 if file would change
 """
 import argparse
-import re
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
@@ -18,28 +21,32 @@ HEADER = (
     "# Keep in sync via scripts/sync_requirements.py + tests/test_requirements_sync.py\n"
 )
 
-
 # These base deps are excluded from requirements.txt (dev-only / not needed at runtime).
 _EXCLUDED_BASE_DEPS = {"matplotlib", "seaborn", "jupyter"}
 
 
-def _extract_deps(toml_text: str, section_pattern: str) -> list[str]:
-    m = re.search(section_pattern, toml_text, re.DOTALL)
-    if not m:
-        return []
-    raw = m.group(1)
-    deps = [d.strip().strip('"').strip("'") for d in raw.split(",") if d.strip().strip('"').strip("'")]
-    return [d for d in deps if d]
-
-
 def _dep_name(dep: str) -> str:
-    return re.split(r"[><=!;]", dep)[0].strip().lower()
+    """Extract bare package name from a PEP 508 dep specifier."""
+    import re
+    return re.split(r"[><=!;@\s]", dep)[0].strip().lower()
 
 
 def generate() -> str:
-    toml = PYPROJECT.read_text()
-    base = _extract_deps(toml, r'dependencies\s*=\s*\[([^\]]+)\]')
-    dash = _extract_deps(toml, r'\[project\.optional-dependencies\].*?dashboard\s*=\s*\[([^\]]+)\]')
+    with open(PYPROJECT, "rb") as f:
+        data = tomllib.load(f)
+
+    base: list[str] = data.get("project", {}).get("dependencies", [])
+    dash: list[str] = (
+        data.get("project", {})
+        .get("optional-dependencies", {})
+        .get("dashboard", [])
+    )
+
+    if not base:
+        sys.exit("ERROR: [project].dependencies is empty or missing in pyproject.toml")
+    if not dash:
+        sys.exit("ERROR: [project.optional-dependencies].dashboard is empty or missing in pyproject.toml")
+
     filtered_base = [d for d in base if _dep_name(d) not in _EXCLUDED_BASE_DEPS]
     all_deps = filtered_base + dash
     return HEADER + "\n".join(all_deps) + "\n"
