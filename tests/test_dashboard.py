@@ -447,18 +447,19 @@ class TestAppSmoke:
                 f"Available labels: {sorted(all_labels)}"
             )
 
-    def test_main_panel_has_12_plots(self):
-        """Main panel renders 12 pyplot figures (as UnknownElement in AppTest 1.57).
+    def test_main_panel_has_13_plots(self):
+        """Main panel renders 13 pyplot figures (as UnknownElement in AppTest 1.57).
 
         Stage 6 added 3 plots (wage hist, wage-vs-output scatter, hiring events).
-        Cumulative-profit panel fills row6_right → count = 8+3+1 = 12.
+        Cumulative-profit panel fills row6_right → 12 plots.
+        Row 7 adds mean-accumulated-wages chart in row7_left → 13 plots total.
         """
         from streamlit.testing.v1 import AppTest
         at = AppTest.from_file("app.py", default_timeout=60).run()
         assert not at.exception
         unknown_count = sum(1 for el in at.main if type(el).__name__ == "UnknownElement")
-        assert unknown_count == 12, (
-            f"Expected 12 st.pyplot (UnknownElement) in main panel, got {unknown_count}"
+        assert unknown_count == 13, (
+            f"Expected 13 st.pyplot (UnknownElement) in main panel, got {unknown_count}"
         )
 
     def test_footer_caption_content(self):

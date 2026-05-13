@@ -284,6 +284,7 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
             "c_train_lost": c_train_lost_period,
             "n_hired": n_hired_period,
             "mean_accum_wage": mean_accum_wage,
+            "ever_worked_count": n_ever_worked,
         })
 
         # -------------------------------------------------------------------
