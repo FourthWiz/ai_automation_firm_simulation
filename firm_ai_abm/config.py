@@ -67,6 +67,8 @@ class FirmParams:
     enable_replenish_hiring: bool = False  # when True, fired workers are queued for rehire after hire_delay_periods
     max_hire_period: int = 0               # per-period hire cap; 0 = drain entire backlog in one period (sentinel)
     hire_delay_periods: int = 1            # periods to wait before hiring back fired workers (>=1)
+    max_hire_per_step: int = 0             # planning action-grid hire cap; 0 = hire-axis degenerates to {0} (byte-parity)
+                                           # distinct from max_hire_period (kernel drain-cap) — this controls the planner grid
 
     # Alpha-dependent automation cost (D-01, D-02, D-05)
     # When belief_alpha is None (default), all three fields are dormant: cost_vec uses the flat

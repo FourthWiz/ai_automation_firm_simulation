@@ -22,21 +22,55 @@ greedy_with_switching: per-task argmax over (gross score - amortized switching
 import numpy as np
 
 from firm_ai_abm.firm import Firm
-from firm_ai_abm.production import Mode
+from firm_ai_abm.production import Mode, compute_K
 
 
 def all_H(firm: Firm, t: int) -> np.ndarray:
     """Return a new modes array with all tasks in Human mode (Mode.H = 0)."""
-    return np.zeros(firm.params.N, dtype=int)
+    modes = np.zeros(firm.params.N, dtype=int)
+    if firm.workforce.K == 0:
+        # K == 0 guard: write 0/0 unconditionally (clears stale prior-period values)
+        firm._fire_intent = 0  # type: ignore[attr-defined]
+        firm._hire_intent = 0  # type: ignore[attr-defined]
+    else:
+        # ceiling per production.py:34, matches kernel clamp at simulate.py:220-229
+        K_max = compute_K(modes, firm.params)
+        firm._fire_intent = 0  # type: ignore[attr-defined]
+        if not firm.params.enable_hiring:
+            firm._hire_intent = max(0, K_max - firm.workforce.K)  # type: ignore[attr-defined]
+        else:
+            firm._hire_intent = 0  # type: ignore[attr-defined]
+    assert not (firm._fire_intent > 0 and firm._hire_intent > 0)  # type: ignore[attr-defined]
+    return modes
 
 
 def all_A(firm: Firm, t: int) -> np.ndarray:
     """Return a new modes array with all tasks in Augmented mode (Mode.A = 1)."""
-    return np.full(firm.params.N, int(Mode.A), dtype=int)
+    modes = np.full(firm.params.N, int(Mode.A), dtype=int)
+    if firm.workforce.K == 0:
+        firm._fire_intent = 0  # type: ignore[attr-defined]
+        firm._hire_intent = 0  # type: ignore[attr-defined]
+    else:
+        # ceiling per production.py:34, matches kernel clamp at simulate.py:220-229
+        K_max = compute_K(modes, firm.params)
+        firm._fire_intent = 0  # type: ignore[attr-defined]
+        if not firm.params.enable_hiring:
+            firm._hire_intent = max(0, K_max - firm.workforce.K)  # type: ignore[attr-defined]
+        else:
+            firm._hire_intent = 0  # type: ignore[attr-defined]
+    assert not (firm._fire_intent > 0 and firm._hire_intent > 0)  # type: ignore[attr-defined]
+    return modes
 
 
 def all_T(firm: Firm, t: int) -> np.ndarray:
     """Return a new modes array with all tasks in Automated mode (Mode.T = 2)."""
+    if firm.workforce.K == 0:
+        firm._fire_intent = 0  # type: ignore[attr-defined]
+        firm._hire_intent = 0  # type: ignore[attr-defined]
+    else:
+        firm._fire_intent = firm.workforce.K  # type: ignore[attr-defined]
+        firm._hire_intent = 0  # type: ignore[attr-defined]
+    assert not (firm._fire_intent > 0 and firm._hire_intent > 0)  # type: ignore[attr-defined]
     return np.full(firm.params.N, int(Mode.T), dtype=int)
 
 
@@ -106,7 +140,25 @@ def greedy_profit(firm: Firm, t: int) -> np.ndarray:
     scores[:, 1] = score_A
     scores[:, 2] = score_T
 
-    return np.argmax(scores, axis=1).astype(int)
+    new_modes = np.argmax(scores, axis=1).astype(int)
+
+    # Write fire/hire intents derived from the mode allocation (D-02-rev)
+    if firm.workforce.K == 0:
+        firm._fire_intent = 0  # type: ignore[attr-defined]
+        firm._hire_intent = 0  # type: ignore[attr-defined]
+    else:
+        # ceiling per production.py:34 -- NOT n_HA // tpw (floor causes spurious fires)
+        # Example: N=100, tasks_per_worker=10, one T-mode task → n_HA=99;
+        # floor=9 but ceil=10 — floor causes _fire_intent=1 every period spuriously.
+        K_needed = compute_K(new_modes, p)
+        firm._fire_intent = max(0, firm.workforce.K - K_needed)  # type: ignore[attr-defined]
+        if not p.enable_hiring:
+            firm._hire_intent = max(0, K_needed - firm.workforce.K)  # type: ignore[attr-defined]
+        else:
+            firm._hire_intent = 0  # type: ignore[attr-defined]
+    assert not (firm._fire_intent > 0 and firm._hire_intent > 0)  # type: ignore[attr-defined]
+
+    return new_modes
 
 
 def greedy_with_switching(firm: Firm, t: int) -> np.ndarray:
@@ -246,4 +298,20 @@ def greedy_with_switching(firm: Firm, t: int) -> np.ndarray:
     switch_cost = S_amort[prev]
 
     net_scores = gross_scores - switch_cost
-    return np.argmax(net_scores, axis=1).astype(int)
+    new_modes = np.argmax(net_scores, axis=1).astype(int)
+
+    # Write fire/hire intents derived from the mode allocation (D-02-rev)
+    if firm.workforce.K == 0:
+        firm._fire_intent = 0  # type: ignore[attr-defined]
+        firm._hire_intent = 0  # type: ignore[attr-defined]
+    else:
+        # ceiling per production.py:34 -- NOT n_HA // tpw (floor causes spurious fires)
+        K_needed = compute_K(new_modes, p)
+        firm._fire_intent = max(0, firm.workforce.K - K_needed)  # type: ignore[attr-defined]
+        if not p.enable_hiring:
+            firm._hire_intent = max(0, K_needed - firm.workforce.K)  # type: ignore[attr-defined]
+        else:
+            firm._hire_intent = 0  # type: ignore[attr-defined]
+    assert not (firm._fire_intent > 0 and firm._hire_intent > 0)  # type: ignore[attr-defined]
+
+    return new_modes

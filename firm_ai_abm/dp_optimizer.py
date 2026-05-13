@@ -16,7 +16,6 @@ CAUTION: posteriors are run-state. External callers that drive the strategy
 directly without calling firm.reset() first inherit stale state — consistent
 with how greedy strategies treat firm.modes.
 """
-import copy
 import math
 
 import numpy as np
@@ -314,131 +313,24 @@ def _apply_firings_on_workforce(workforce_copy, fire_indices: np.ndarray, t: int
 
 
 def _forward_simulate(firm, t: int, path: list, horizon: int) -> float:
-    """Forward-simulate horizon steps along a given action path; return cumulative profit.
+    """Thin compatibility shim — translates 2-tuple paths to Action(n_fire, n_aug, n_hire=0).
 
-    Per CRIT-1 / MAJ-13 / D-05: performs exactly ONE deepcopy of firm.workforce
-    at the TOP of this function (one per leaf path). The rest of firm is read as
-    immutable (modes, alpha, beta, alpha_hat, beta_hat, params).
-
-    D-11: adj_cost called with workforce=None (Phase-1 per-task fallback, no
-    a_trained mutation on the live firm).
-
-    D-13: theta_per_task is OMITTED (defaults to None → ones inside productivity_vec).
-    The optimizer plans against a theta-flat counterfactual; the live kernel uses
-    the true theta array. Planning gap ≤5-15% under field sigma_theta.
+    Delegates to forward_simulate_action_path. Do not add new call sites; use Action directly.
+    Preserves backward compatibility with all 7 existing call sites (lines 414, 522, 551,
+    569, 577, 578, 601) and 3 test imports (lines 49, 51, 326).
 
     Args:
-        firm: Live Firm instance (read-only except alpha_hat/beta_hat side-effect
-              from _update_posteriors, which runs BEFORE _forward_simulate).
-        t: Current simulation period (step 0 of this path = projected period t).
-        path: List of (n_fire, n_aug) action tuples, length == horizon.
+        firm: Live Firm instance.
+        t: Current simulation period.
+        path: List of (n_fire, n_aug) 2-tuples, length == horizon.
         horizon: Number of steps to project.
 
     Returns:
         Cumulative profit over the horizon steps (float).
     """
-    # Per-path deepcopy: one deepcopy per leaf evaluation (CRIT-1 / D-05 / D-11)
-    f_workforce = copy.deepcopy(firm.workforce)
-    f_modes = firm.modes.copy()
-    alpha_hat = firm.alpha_hat   # read-only view; never mutated here
-    beta_hat = firm.beta_hat     # read-only view; never mutated here
-    params = firm.params
-
-    # CRIT-9 fix: pending_hires is list[tuple[int, int]] — (period_eligible, n_remaining).
-    # Use tuple unpacking; n_remaining can be >1 (simulate.py:161 appends n_review_fired_period).
-    pending = list(getattr(firm, "pending_hires", []))  # shallow copy of tuples
-
-    # D-13: theta-flat counterfactual — theta_per_task is explicitly None.
-    # The optimizer plans against theta=1.0 for all tasks; the live kernel uses true theta.
-
-    # f_K_extra: tracks pending-hire arrivals during forward simulation.
-    # Workforce.K is a read-only property (derived from len(theta)), so we cannot
-    # set wf.K directly. For pending hires in planning, we track the count
-    # separately and add it to the wage bill. This is a conservative approximation:
-    # pending hires bump the wage bill but we don't allocate tasks to phantom workers.
-    f_K_extra = 0
-
-    path_pi = 0.0
-
-    for s in range(horizon):
-        n_fire_step, n_aug_step = path[s]
-        prev_modes = f_modes.copy()
-
-        # Step 1: Pending-hire arrivals (CRIT-9 fix): sum n_remaining across all
-        # tuples whose period_eligible == t+s, then bump f_K_extra by total.
-        # Tuple unpacking — never dict access. K is a read-only property of Workforce
-        # (derived from len(theta)), so we track hires separately as f_K_extra.
-        n_arr = sum(n for (per_eligible, n) in pending if per_eligible == t + s)
-        if n_arr > 0:
-            f_K_extra += n_arr  # track arriving hires separately
-        pending = [(per_eligible, n) for (per_eligible, n) in pending if per_eligible > t + s]
-
-        # Step 2: Fire workers (calendar-gated; only on review periods)
-        if _is_review_period(t + s, params.T_review) and n_fire_step > 0:
-            # Get output history for cost-effectiveness sort (MAJ-14 seam)
-            opw = getattr(firm, "_output_per_worker_so_far", None)
-            if opw is None:
-                # Degenerate fallback: no history (t=0 + missing seam)
-                K_orig = firm.workforce.K if firm.workforce is not None else f_workforce.K
-                opw = np.zeros((1, max(K_orig, f_workforce.K)), dtype=np.float64)
-
-            # Temporarily update f_workforce.K on firm-copy context for the sort
-            # We pass our deepcopy's K by temporarily patching (or just using direct
-            # reference — _sort helper only reads firm.params and firm.modes for
-            # fireable detection; wages/K are read from the passed arrays directly)
-            fire_idx = _sort_fireable_workers_by_cost_effectiveness(
-                firm,          # read firm.params and firm.modes for fireable detection
-                opw,           # full 2D historical array
-                f_workforce.wage,
-                t + s,
-            )[:n_fire_step]
-
-            f_workforce, _, _ = _apply_firings_on_workforce(f_workforce, fire_idx, t + s)
-            # MIN-2 planning approximation: charges c_fire * n_fire_step (DP's own
-            # selected count). The kernel charges c_fire * |threshold ∪ dp_set|;
-            # the UNION count >= n_fire_step, so forward-sim may undercount fire cost
-            # when the threshold rule also fires some of the same workers. Small
-            # magnitude; pursuing requires modeling threshold-rule selection in the
-            # forward sim (substantial complexity). Deferred per review MIN-2.
-            path_pi -= params.c_fire * n_fire_step
-
-        # Step 3: Apply mode change (promote top n_aug_step H tasks by beta_hat → A)
-        f_modes = _apply_action_to_modes(f_modes, alpha_hat, beta_hat, n_aug_step, params)
-
-        # Step 4: Compute period productivity and profit
-        # CRIT-5: alpha_hat passed by KEYWORD `alpha=alpha_hat` (explicit semantics).
-        # MAJ-11: cost_vec has NO `beta` parameter — augmentation cost is flat c_aug.
-        # D-13: theta_per_task omitted on purpose (None → ones; theta-flat counterfactual).
-        prod = productivity_vec(
-            f_modes,
-            alpha=alpha_hat,
-            beta=beta_hat,
-            params=params,
-            # theta_per_task omitted on purpose (None → ones; see D-13)
-        )
-        # MIN-1 fix: assigned-workers-only wage bill (mirrors simulate.py:288-290 semantics).
-        # Forward-sim avoids task_to_worker_map because modes are not clamped after firings
-        # (K can shrink while f_modes still holds pre-fire H/A assignments), which would
-        # trigger task_to_worker_map's K=0/capacity assertions. Instead, derive the active
-        # worker count from H/A task count capped at current K — same result under the
-        # contiguous-slot assignment model, without the assertion risk.
-        _n_HA = int(((f_modes == int(Mode.H)) | (f_modes == int(Mode.A))).sum())
-        _K_active = min(_n_HA // params.tasks_per_worker, f_workforce.K)
-        _wage_f = float(f_workforce.wage[:_K_active].sum()) if _K_active > 0 else 0.0
-        cost = (
-            cost_vec(f_modes, alpha=alpha_hat, params=params).sum()
-            # NB: cost_vec has no `beta` parameter — see MAJ-11 / D-06.
-            # Pending-hire phantoms (f_K_extra) are not yet assigned tasks; flat rate.
-            + _wage_f + f_K_extra * params.w
-            + params.F
-        )
-        # adj_cost — pass workforce=None per CRIT-1 (no a_trained mutation on live firm)
-        path_pi += (
-            params.p * prod.sum() - cost
-            - adj_cost(prev_modes, f_modes, params, workforce=None)
-        )
-
-    return path_pi
+    from firm_ai_abm.forward_sim import Action, forward_simulate_action_path
+    action_path = [Action(n_fire=nf, n_aug=na, n_hire=0) for nf, na in path]
+    return forward_simulate_action_path(firm, t, action_path, horizon)
 
 
 def _candidates_at_step(modes_s: np.ndarray, K_s: int, t_s: int, params: "FirmParams") -> tuple:

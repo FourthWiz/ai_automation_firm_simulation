@@ -47,6 +47,27 @@ class Firm:
     def K(self) -> int:
         return self.workforce.K if self.workforce is not None else 0
 
+    @property
+    def _dp_optimizer_n_fire(self) -> int:
+        """Backward-compat alias — delegates to _fire_intent (single source of truth)."""
+        return self._fire_intent  # type: ignore[attr-defined]
+
+    @_dp_optimizer_n_fire.setter
+    def _dp_optimizer_n_fire(self, value: int) -> None:
+        self._fire_intent = value  # type: ignore[attr-defined]
+
+    def _assert_intent_invariants(self) -> None:
+        """Defensive check: fire and hire intents are mutually exclusive per period."""
+        fire = getattr(self, "_fire_intent", 0)
+        hire = getattr(self, "_hire_intent", 0)
+        assert not (fire > 0 and hire > 0), (
+            f"_fire_intent ({fire}) and _hire_intent ({hire}) are mutually exclusive per period"
+        )
+        if self.params.enable_hiring:
+            assert hire == 0, (
+                f"_hire_intent must be 0 under enable_hiring=True; got {hire}"
+            )
+
     def reset(self) -> None:
         """Reset modes/history/pending_hires/posteriors. NEVER touches alpha, beta, or workforce.
 
@@ -69,9 +90,14 @@ class Firm:
         # Posterior arrays — run-state; reset to prior mean on every fresh run.
         self.alpha_hat = np.full(N, _DP_PRIOR_MEAN, dtype=np.float64)
         self.beta_hat = np.full(N, _DP_PRIOR_MEAN, dtype=np.float64)
-        # DP fire-count hint — run-state; zeroed here so a non-DP strategy
-        # inheriting this firm never reads a stale value (MIN-3 defensive clear).
-        self._dp_optimizer_n_fire = 0  # type: ignore[attr-defined]
+        # Intent attributes — run-state; zeroed here so a non-calling strategy
+        # never reads stale values from a prior period.
+        # _fire_intent: set by strategies (or 0 for non-participating strategies);
+        #   consumed by the kernel's two-source firing merge at Step 0 of the next period.
+        # _hire_intent: set by horizon strategies; consumed at Step 0.5b of the next period.
+        # _dp_optimizer_n_fire is a @property delegating to _fire_intent (backward-compat).
+        self._fire_intent: int = 0  # type: ignore[attr-defined]
+        self._hire_intent: int = 0  # type: ignore[attr-defined]
         # workforce is NOT re-sampled here — it persists for the firm's lifetime.
         # cum_wage IS zeroed because it is run-state (like pending_hires), not firm-identity state.
         if self.workforce is not None:
