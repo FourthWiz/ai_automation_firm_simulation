@@ -111,7 +111,7 @@ def test_fixture_byte_parity_dormant(name, strategy):
     fixture_path = f"{_FIXTURE_DIR}/{_STRATEGY_FIXTURE_MAP[name]}"
     fixture = pd.read_parquet(fixture_path)
 
-    firm = make_firm(FirmParams(seed=0, tasks_per_worker=10, p=1.0, sigma_theta=0.0, sigma_w=0.0))
+    firm = make_firm(FirmParams(seed=0, N=100, tasks_per_worker=10, p=1.0, sigma_theta=0.0, sigma_w=0.0))
     df = run_simulation(firm, strategy)
 
     result_vals = df[_COLS].values

@@ -84,7 +84,7 @@ def test_validate_uses_pinned_defaults():
 
             # Check if this line or adjacent context pins tasks_per_worker
             call_start = lineno - 1  # 0-indexed
-            context_lines = lines[call_start : call_start + 8]
+            context_lines = lines[call_start : call_start + 15]
             context = "\n".join(context_lines)
 
             if "tasks_per_worker=" not in context:
@@ -94,5 +94,52 @@ def test_validate_uses_pinned_defaults():
         "Unpinned FirmParams() calls found in firm_ai_abm/ (no tasks_per_worker= set).\n"
         "These will silently use new defaults (tpw=5, p=0.22) and break Stage 1-5 numerics.\n"
         "Add tasks_per_worker=10 (and p=1.0) to each call site:\n"
+        + "\n".join(f"  {s}" for s in failing_sites)
+    )
+
+
+def test_validate_uses_pinned_N():
+    """Every FirmParams( call in executable code in firm_ai_abm/*.py must pin N=.
+
+    After the N=500 default change (D-01), any unguarded FirmParams() in validate.py
+    or other modules would run Phase-1 checks at N=500, breaking parity fixtures
+    captured at N=100. This meta-test guards against future regressions.
+    Calls in docstrings and comments are excluded. Tests/ files are exempt.
+    """
+    failing_sites = []
+
+    for py_file in _collect_module_files():
+        source = py_file.read_text(encoding="utf-8")
+        lines = source.splitlines()
+
+        for lineno, line in enumerate(lines, start=1):
+            stripped = line.strip()
+
+            if stripped.startswith("#"):
+                continue
+
+            if _is_in_docstring(lines, lineno - 1):
+                continue
+
+            if stripped.startswith('"""') or stripped.startswith("'''"):
+                continue
+
+            if "FirmParams(" not in line:
+                continue
+
+            if re.search(r"def\s+\w+.*FirmParams", line):
+                continue
+
+            call_start = lineno - 1
+            context_lines = lines[call_start : call_start + 15]
+            context = "\n".join(context_lines)
+
+            if "N=" not in context:
+                failing_sites.append(f"{py_file.name}:{lineno}: {stripped[:80]}")
+
+    assert not failing_sites, (
+        "FirmParams() calls without explicit N= found in firm_ai_abm/.\n"
+        "These will silently use the new default (N=500) and may break Phase-1 parity.\n"
+        "Add N=100 (or appropriate value) to each call site:\n"
         + "\n".join(f"  {s}" for s in failing_sites)
     )

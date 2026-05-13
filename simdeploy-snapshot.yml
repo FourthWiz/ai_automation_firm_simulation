@@ -37,7 +37,7 @@
             - button "Help for Firm size in tasks (N)" [ref=e78] [cursor=pointer]:
               - img [ref=e79]
           - generic [ref=e82]:
-            - spinbutton "Firm size in tasks (N)" [ref=e85]: "100"
+            - spinbutton "Firm size in tasks (N)" [ref=e85]: "500"
             - generic [ref=e86]:
               - button [ref=e87] [cursor=pointer]:
                 - img [ref=e88]

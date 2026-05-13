@@ -6,7 +6,7 @@ from dataclasses import dataclass
 @dataclass
 class FirmParams:
     # Counts
-    N: int = 100                 # number of tasks
+    N: int = 500                 # number of tasks
     T: int = 60                  # number of periods
     tasks_per_worker: int = 5    # how many tasks one worker covers
 

@@ -20,9 +20,12 @@ from firm_ai_abm.validate import check11_replenish_numeraire
 # ---------------------------------------------------------------------------
 
 def _params_with_firings(**kwargs) -> FirmParams:
-    """FirmParams that produce firings at T_review=10 (all_H, p=0.22, tpw=5, sigma=0)."""
+    """FirmParams that produce firings at T_review=10 (all_H, p=0.22, tpw=5, N=100, sigma=0).
+
+    N=100 is pinned explicitly: at N=500 the F/K share is too small to trigger firings.
+    """
     defaults = dict(
-        seed=0, sigma_theta=0.0, sigma_w=0.0,
+        seed=0, N=100, sigma_theta=0.0, sigma_w=0.0,
         T=40, T_review=10.0, firing_threshold=0.0,
         p=0.22, tasks_per_worker=5,
         enable_replenish_hiring=True,

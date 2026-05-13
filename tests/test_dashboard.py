@@ -41,7 +41,7 @@ from firm_ai_abm.strategy import greedy_profit, all_T
 @pytest.fixture(scope="module")
 def default_df():
     """Run simulation with default FirmParams(seed=0) and greedy_profit."""
-    p = FirmParams(seed=0, tasks_per_worker=10, p=1.0)
+    p = FirmParams(seed=0, N=100, tasks_per_worker=10, p=1.0)  # N=100: Phase-1 fixture scale
     firm = make_firm(p)
     df = run_simulation(firm, greedy_profit)
     return df, firm, p
@@ -50,7 +50,7 @@ def default_df():
 @pytest.fixture(scope="module")
 def all_t_df():
     """Run simulation with all_T strategy (tests empty wage_bill / n_a_trained)."""
-    p = FirmParams(seed=0, tasks_per_worker=10, p=1.0)
+    p = FirmParams(seed=0, N=100, tasks_per_worker=10, p=1.0)  # N=100: Phase-1 fixture scale
     firm = make_firm(p)
     df = run_simulation(firm, all_T)
     return df, firm, p

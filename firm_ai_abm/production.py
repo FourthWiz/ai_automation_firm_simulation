@@ -151,7 +151,7 @@ def _compute_K_table_check() -> None:
     Not called at import time. Not in __all__. Phase 4 will migrate this to
     a pytest module when tests/ is created (R-11).
     """
-    params = FirmParams(tasks_per_worker=10, p=1.0)
+    params = FirmParams(N=100, tasks_per_worker=10, p=1.0)
 
     # (n_HA, expected_K) pairs
     cases = [(0, 0), (9, 1), (10, 1), (11, 2), (100, 10), (101, 11)]
