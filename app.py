@@ -4,7 +4,7 @@ Single-page app that imports the simulation kernel directly and renders
 15 Plotly charts across 5 tabs with primary controls in the main panel.
 
 Architecture notes:
-- @st.cache_data keyed on a 35-tuple of scalars (D-01): avoids passing
+- @st.cache_data keyed on a 36-tuple of scalars (D-01): avoids passing
   the FirmParams dataclass directly and sidesteps hash_funcs API.
 - Default seed=0 (D-02): prevents cache instability from seed=None.
 - Run button gates the simulation (D-04): no auto-rerun on slider drag.
@@ -91,14 +91,14 @@ _STRATEGY_REGISTRY = {
     "horizon_optimizer": dp_rolling_horizon_strategy,  # new DP rolling-horizon optimizer (F-03)
 }
 
-# 34 scalar FirmParams fields in order (excludes 'seed' which is appended separately)
+# 35 scalar FirmParams fields in order (excludes 'seed' which is appended separately)
 # Indices: 0=N, 15=sigma_theta, 20=T_review, 21=firing_threshold, 22=scenario_mode,
 #          23=target_margin, 24=margin_horizon, 25=enable_training_delay,
 #          26=enable_hiring, 27=enable_replenish_hiring, 28=max_hire_period,
-#          29=hire_delay_periods, 30=alpha_mean, 31=alpha_concentration,
-#          32=beta_mean, 33=beta_concentration, -1=seed (position 34)
+#          29=max_hire_per_step, 30=hire_delay_periods, 31=alpha_mean,
+#          32=alpha_concentration, 33=beta_mean, 34=beta_concentration, -1=seed (position 35)
 # NOTE: alpha-cost fields (c_auto_alpha_slope, c_auto_alpha_intercept, belief_alpha)
-# are intentionally absent — no sidebar exposure.
+# and enable_horizon_brute_action_grid are intentionally absent — no sidebar exposure.
 _PARAM_FIELDS = (
     "N", "T", "tasks_per_worker",
     "q_h", "q_a", "g",
@@ -111,11 +111,12 @@ _PARAM_FIELDS = (
     "enable_hiring",                # index 26
     "enable_replenish_hiring",      # index 27
     "max_hire_period",              # index 28
-    "hire_delay_periods",           # index 29
-    "alpha_mean",                   # index 30
-    "alpha_concentration",          # index 31
-    "beta_mean",                    # index 32
-    "beta_concentration",           # index 33; seed moves to position 34 (still key[-1])
+    "max_hire_per_step",            # index 29
+    "hire_delay_periods",           # index 30
+    "alpha_mean",                   # index 31
+    "alpha_concentration",          # index 32
+    "beta_mean",                    # index 33
+    "beta_concentration",           # index 34; seed moves to position 35 (still key[-1])
 )
 
 # Named index constant for sigma_theta (used in tab_het branch logic)
@@ -129,17 +130,18 @@ assert set(_PARAM_FIELDS + ("seed",)) <= {f.name for f in dataclasses.fields(Fir
 
 
 def params_to_key(params: FirmParams, seed: int) -> tuple:
-    """Build a 35-tuple cache key from a FirmParams instance and seed.
+    """Build a 36-tuple cache key from a FirmParams instance and seed.
 
     The tuple contains only Python scalars (int, float, bool, str). math.inf is
     included as a float — hash(math.inf) is stable in CPython.
-    seed is appended as the 35th element (position 34).
+    seed is appended as the 36th element (position 35).
 
     Indices: 0=N, 15=sigma_theta, 20=T_review, 21=firing_threshold, 22=scenario_mode,
              23=target_margin, 24=margin_horizon, 25=enable_training_delay,
              26=enable_hiring, 27=enable_replenish_hiring, 28=max_hire_period,
-             29=hire_delay_periods, 30=alpha_mean, 31=alpha_concentration,
-             32=beta_mean, 33=beta_concentration, -1=seed (position 34)
+             29=max_hire_per_step, 30=hire_delay_periods, 31=alpha_mean,
+             32=alpha_concentration, 33=beta_mean, 34=beta_concentration,
+             -1=seed (position 35)
     """
     values = tuple(getattr(params, f) for f in _PARAM_FIELDS)
     return values + (seed,)
@@ -147,7 +149,7 @@ def params_to_key(params: FirmParams, seed: int) -> tuple:
 
 # All widget key strings used in _build_controls — for Reset button
 # Net delta from prior version: +strategy, +hiring_mode, -enable_hiring,
-# -enable_replenish_hiring → net 0; +4 (alpha/beta dist params); final count = 35.
+# -enable_replenish_hiring → net 0; +4 (alpha/beta dist params); +1 max_hire_per_step; final count = 36.
 ALL_WIDGET_KEYS = (
     "strategy",
     "N", "T", "seed",
@@ -159,7 +161,7 @@ ALL_WIDGET_KEYS = (
     "sigma_theta", "theta_min", "theta_max", "corr_w_theta", "sigma_w",
     "T_review", "firing_threshold",
     "hiring_mode",
-    "hire_delay_periods", "max_hire_period",
+    "hire_delay_periods", "max_hire_period", "max_hire_per_step",
     "enable_training_delay",
     "alpha_mean", "alpha_concentration", "beta_mean", "beta_concentration",
 )
@@ -185,12 +187,13 @@ def run_cached(params_key: tuple, strategy_name: str) -> tuple:
     """Run the simulation for the given params key and strategy.
 
     Args:
-        params_key: 35-tuple from params_to_key(). The last element is seed.
+        params_key: 36-tuple from params_to_key(). The last element is seed.
             Indices 15=sigma_theta, 20=T_review, 21=firing_threshold, 22=scenario_mode,
             23=target_margin, 24=margin_horizon, 25=enable_training_delay,
             26=enable_hiring, 27=enable_replenish_hiring, 28=max_hire_period,
-            29=hire_delay_periods, 30=alpha_mean, 31=alpha_concentration,
-            32=beta_mean, 33=beta_concentration, -1=seed (position 34).
+            29=max_hire_per_step, 30=hire_delay_periods, 31=alpha_mean,
+            32=alpha_concentration, 33=beta_mean, 34=beta_concentration,
+            -1=seed (position 35).
         strategy_name: key into _STRATEGY_REGISTRY.
 
     Returns:
@@ -349,7 +352,7 @@ def _build_controls() -> tuple:
              "enable_replenish_hiring = delayed backlog refill (mutually exclusive)",
     )
 
-    col_c1, col_c2, col_c3, col_c4 = st.columns([1, 1, 1, 1])
+    col_c1, col_c2, col_c3, col_c4, col_c5 = st.columns([1, 1, 1, 1, 1])
 
     with col_c1:
         tasks_per_worker = st.number_input(
@@ -382,6 +385,15 @@ def _build_controls() -> tuple:
             value=5, step=1, key="max_hire_period",
             help="Per-period hire cap from backlog. 0 = drain entire backlog in one period.",
             disabled=(hiring_mode == "off"),
+        )
+
+    with col_c5:
+        max_hire_per_step_val = st.number_input(
+            "max_hire_per_step", min_value=0, max_value=50,
+            value=0, step=1, key="max_hire_per_step",
+            help="Planner action-grid hire cap per step. 0 = hire-axis degenerates to {0} (byte-parity). "
+                 "Active only when enable_replenish_hiring=True.",
+            disabled=(hiring_mode != "enable_replenish_hiring"),
         )
 
     # ------------------------------------------------------------------
@@ -579,6 +591,7 @@ def _build_controls() -> tuple:
         enable_hiring=bool(enable_hiring_val),
         enable_replenish_hiring=bool(enable_replenish_hiring_val),
         max_hire_period=int(max_hire_period_val),
+        max_hire_per_step=int(max_hire_per_step_val),
         hire_delay_periods=int(hire_delay_periods_val),
         alpha_mean=float(alpha_mean),
         alpha_concentration=float(alpha_concentration),

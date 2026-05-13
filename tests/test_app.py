@@ -47,25 +47,27 @@ def test_enable_training_delay_checkbox_defaults_true():
 
 
 def test_cache_key_length():
-    """T-16: cache key has exactly 35 elements; _PARAM_FIELDS has exactly 34.
+    """T-16: cache key has exactly 36 elements; _PARAM_FIELDS has exactly 35.
 
-    Updated from 30/31 to 34/35 after beta-dist-task-attrs added 4 fields:
-    alpha_mean (30), alpha_concentration (31), beta_mean (32), beta_concentration (33).
-    seed is still key[-1] at position 34.
+    Updated from 34/35 to 35/36 after max_hire_per_step added at index 29:
+    max_hire_per_step (29), hire_delay_periods (30), alpha_mean (31),
+    alpha_concentration (32), beta_mean (33), beta_concentration (34).
+    seed is still key[-1] at position 35.
     """
-    assert len(_PARAM_FIELDS) == 34, (
-        f"Expected 34 fields in _PARAM_FIELDS, got {len(_PARAM_FIELDS)}"
+    assert len(_PARAM_FIELDS) == 35, (
+        f"Expected 35 fields in _PARAM_FIELDS, got {len(_PARAM_FIELDS)}"
     )
     key = params_to_key(FirmParams(), 0)
-    assert len(key) == 35, (
-        f"Expected 35-tuple from params_to_key, got {len(key)}"
+    assert len(key) == 36, (
+        f"Expected 36-tuple from params_to_key, got {len(key)}"
     )
     # Spot-check: index 26 = enable_hiring (unchanged), 27 = enable_replenish_hiring,
-    # 30 = alpha_mean, 33 = beta_concentration, -1 = seed at position 34.
+    # 29 = max_hire_per_step, 31 = alpha_mean, 34 = beta_concentration, -1 = seed at position 35.
     assert key[26] == FirmParams().enable_hiring, f"key[26] should be enable_hiring, got {key[26]}"
     assert key[27] == FirmParams().enable_replenish_hiring, f"key[27] should be enable_replenish_hiring, got {key[27]}"
-    assert key[30] == FirmParams().alpha_mean, f"key[30] should be alpha_mean, got {key[30]}"
-    assert key[33] == FirmParams().beta_concentration, f"key[33] should be beta_concentration, got {key[33]}"
+    assert key[29] == FirmParams().max_hire_per_step, f"key[29] should be max_hire_per_step, got {key[29]}"
+    assert key[31] == FirmParams().alpha_mean, f"key[31] should be alpha_mean, got {key[31]}"
+    assert key[34] == FirmParams().beta_concentration, f"key[34] should be beta_concentration, got {key[34]}"
     assert key[-1] == 0, f"key[-1] should be seed=0, got {key[-1]}"
 
 
