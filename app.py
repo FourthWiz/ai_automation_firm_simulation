@@ -85,7 +85,7 @@ _STRATEGY_REGISTRY = {
     "all_T": all_T,
     "greedy_profit": greedy_profit,
     "greedy_with_switching": greedy_with_switching,
-    "target_margin": target_margin_strategy,
+    "horizon_optimizer": target_margin_strategy,
 }
 
 # 30 scalar FirmParams fields in order (excludes 'seed' which is appended separately)
@@ -137,10 +137,10 @@ def params_to_key(params: FirmParams, seed: int) -> tuple:
 
 
 # All widget key strings used in _build_controls — for Reset button
-# Net delta from prior version: +strategy, +strategy_adv, +hiring_mode, -enable_hiring,
-# -enable_replenish_hiring → net +1; final count = 32.
+# Net delta from prior version: +strategy, +hiring_mode, -enable_hiring,
+# -enable_replenish_hiring → net 0; final count = 31.
 ALL_WIDGET_KEYS = (
-    "strategy", "strategy_adv",
+    "strategy",
     "N", "T", "seed",
     "q_a", "g", "c_auto", "w", "p", "target_margin",
     "scenario",
@@ -240,16 +240,16 @@ def _build_controls() -> tuple:
         (strategy_name: str, params_key: tuple[31 scalars], draft_params: FirmParams)
     """
     # ------------------------------------------------------------------
-    # Row A: strategy radio (simple) | T | N
-    # D-02: non-advanced shows greedy_profit / greedy_with_switching only
+    # Row A: strategy radio | T | N
+    # Single unified strategy chooser with all 6 options. Default = greedy_profit (index 3).
     # ------------------------------------------------------------------
     col_a1, col_a2, col_a3 = st.columns([2, 1, 1])
 
     with col_a1:
         strategy = st.radio(
             "Strategy",
-            ["greedy_profit", "greedy_with_switching"],
-            index=0,
+            list(_STRATEGY_REGISTRY.keys()),
+            index=3,  # greedy_profit
             key="strategy",
             horizontal=True,
         )
@@ -390,19 +390,15 @@ def _build_controls() -> tuple:
             F = st.slider("F", 0.0, 20.0, float(FirmParams().F), 0.5,
                           help="Fixed overhead cost per period", key="F")
 
-        # Strategy & pricing (D-02: scenario + strategy_adv + p + target_margin + meta)
+        # Strategy & pricing (scenario + p + target_margin + meta)
         with adv_tabs[1]:
-            scenario = st.radio("Scenario", ["price", "margin"], index=0, key="scenario")
-            if scenario == "margin":
-                st.markdown("**Strategy:** target_margin *(auto)*")
-                strategy_adv = "target_margin"
-            else:
-                strategy_adv = st.radio(
-                    "Strategy (override)",
-                    list(_STRATEGY_REGISTRY.keys()),
-                    index=3,  # greedy_profit
-                    key="strategy_adv",
-                )
+            scenario = st.radio(
+                "Scenario",
+                ["price", "margin"],
+                index=0,
+                key="scenario",
+                help="Pricing mode: 'price' uses output price p; 'margin' uses target_margin. Strategy is selected separately above.",
+            )
             p = st.slider(
                 "Output price (p)", 0.1, 2.0, float(FirmParams().p), 0.05,
                 help="Output price (inactive in margin scenario)",
@@ -497,18 +493,9 @@ def _build_controls() -> tuple:
     enable_replenish_hiring_val = (hiring_mode == "enable_replenish_hiring")
 
     # ------------------------------------------------------------------
-    # D-02: merge active_strategy from both radios
-    # Rule: scenario=margin → target_margin always.
-    #       Advanced radio != default ("greedy_profit") → advanced wins.
-    #       Otherwise non-advanced radio wins.
+    # Single strategy source: main radio widget drives active_strategy directly.
     # ------------------------------------------------------------------
-    _ADV_DEFAULT = "greedy_profit"
-    if scenario == "margin":
-        active_strategy = "target_margin"
-    elif strategy_adv != _ADV_DEFAULT:
-        active_strategy = strategy_adv
-    else:
-        active_strategy = strategy  # non-advanced wins when advanced is at default
+    active_strategy = strategy
 
     # ------------------------------------------------------------------
     # Build FirmParams and cache key
@@ -553,8 +540,8 @@ def _build_controls() -> tuple:
     #                                  and test_hiring_mode_mutex_kernel_mapping
     st.session_state["DRAFT_PARAMS_DEBUG"] = draft_params
 
-    # load-bearing for tests: AppTest reads LAST_STRATEGY_DEBUG to verify merge function
-    # do NOT remove — removing breaks test_strategy_merge_function
+    # load-bearing for tests: AppTest reads LAST_STRATEGY_DEBUG to verify active strategy
+    # do NOT remove — removing breaks test_strategy_single_widget_all_options and related tests
     st.session_state["LAST_STRATEGY_DEBUG"] = active_strategy
 
     return active_strategy, key, draft_params
