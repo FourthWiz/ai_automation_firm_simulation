@@ -107,8 +107,8 @@ def test_projection_uses_run_horizon():
 
     original_run_horizon = run_horizon
 
-    def patched_run_horizon(firm_copy, cand, horizon):
-        df = original_run_horizon(firm_copy, cand, horizon)
+    def patched_run_horizon(firm_copy, cand, horizon, use_posteriors=False):
+        df = original_run_horizon(firm_copy, cand, horizon, use_posteriors=use_posteriors)
         captured_dfs.append(df)
         return df
 
@@ -139,8 +139,8 @@ def test_projection_row_count():
     captured_dfs = []
     original_run_horizon = run_horizon
 
-    def patched_run_horizon(firm_copy, cand, horizon):
-        df = original_run_horizon(firm_copy, cand, horizon)
+    def patched_run_horizon(firm_copy, cand, horizon, use_posteriors=False):
+        df = original_run_horizon(firm_copy, cand, horizon, use_posteriors=use_posteriors)
         captured_dfs.append(df)
         return df
 
