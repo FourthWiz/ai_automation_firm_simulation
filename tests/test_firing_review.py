@@ -482,8 +482,17 @@ def test_T13_c_train_lost_zero_when_no_trained_workers():
 
 
 def test_T14_T_review_inf_equals_T_review_999():
-    """T_review=inf and T_review=999 (never fires in T=60 window) produce identical history."""
-    parity_cols = ["t", "Y", "C", "pi", "K", "adj_cost"]
+    """T_review=inf and T_review=999 (never fires in T=60 window) produce identical history.
+
+    NOTE (firing-timing-and-horizon-fix T-02): adj_cost and C are intentionally excluded
+    from parity_cols. Under finite T_review (999), adj_cost zeros the c_fire term for H→T
+    / A→T transitions (Fix 2a). C includes adj_cost, so it differs too at t=0 for any
+    strategy that switches modes (e.g., all_T: H→T at t=0 charges c_fire×K under inf but
+    0 under 999). Y and K remain byte-identical because no workers are fired within T=60
+    periods (T_review=999 > 60). pi is excluded because it depends on C. See plan D-02
+    and lesson 2026-05-09.
+    """
+    parity_cols = ["t", "Y", "K"]
     strategies = [
         ("all_H", all_H),
         ("all_A", all_A),

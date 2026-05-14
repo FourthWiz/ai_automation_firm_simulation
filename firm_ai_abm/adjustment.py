@@ -31,6 +31,7 @@ Cost model contract (architecture D-02, R-03):
 """
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -174,7 +175,13 @@ def adj_cost(
     # Lumpy hire/fire based on K change (architecture D-02)
     K_prev = compute_K(prev_modes, params)
     K_new = compute_K(new_modes, params)
-    fire_cost = params.c_fire * max(0, K_prev - K_new)
+    # isfinite-first guard — int(math.inf) raises OverflowError (lesson 2026-05-09)
+    # Under finite T_review, periodic-review firings are handled by the firing gate
+    # (simulate.py Step 0); adj_cost must not double-charge c_fire at the transition.
+    if math.isfinite(params.T_review):
+        fire_cost = 0.0
+    else:
+        fire_cost = params.c_fire * max(0, K_prev - K_new)
     hire_cost = params.c_hire * max(0, K_new - K_prev)
 
     return float(training_cost + fire_cost + hire_cost)

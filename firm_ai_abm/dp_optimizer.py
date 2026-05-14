@@ -39,7 +39,9 @@ from firm_ai_abm.adjustment import adj_cost
 # ---------------------------------------------------------------------------
 
 _DP_HORIZON_MAX: int = 5
-"""Hard cap on lookahead depth (D-03). UI margin_horizon slider is clamped to this."""
+"""Hard cap on lookahead depth (D-03). UI margin_horizon slider is clamped to this.
+Also applies to horizon_brute_strategy in margin_optimizer.py (T-01 — capped via
+`min(_DP_HORIZON_MAX, firm.params.margin_horizon)` at planning time)."""
 
 _DP_GRID_LEVELS: tuple = (0.0, 0.25, 0.5, 0.75, 1.0)
 """5 fractional levels for both fire% and aug% at each planning step."""

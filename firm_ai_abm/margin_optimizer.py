@@ -25,6 +25,7 @@ import math
 
 import numpy as np
 
+from firm_ai_abm.dp_optimizer import _DP_HORIZON_MAX
 from firm_ai_abm.firm import Firm
 from firm_ai_abm.simulate import run_horizon
 from firm_ai_abm.strategy import all_H, all_A, all_T, greedy_profit, greedy_with_switching
@@ -122,7 +123,13 @@ def horizon_brute_strategy(firm: Firm, t: int) -> np.ndarray:
     if key in cache:
         return cache[key].copy()
 
-    horizon = firm.params.margin_horizon
+    if firm.params.margin_horizon > _DP_HORIZON_MAX:
+        import logging
+        logging.getLogger(__name__).warning(
+            "margin_horizon=%d exceeds _DP_HORIZON_MAX=%d; capping to %d",
+            firm.params.margin_horizon, _DP_HORIZON_MAX, _DP_HORIZON_MAX,
+        )
+    horizon = min(_DP_HORIZON_MAX, firm.params.margin_horizon)
     scenario_mode = firm.params.scenario_mode
 
     if firm.params.enable_horizon_brute_action_grid:
