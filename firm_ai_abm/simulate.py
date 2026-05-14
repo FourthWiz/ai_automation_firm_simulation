@@ -311,9 +311,18 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int, use_posteriors: bo
         # byte-identity of task_costs, C, and pi under dormant T_review=inf default)
         task_costs = float(cost_vec(firm.modes, alpha, params, a_in_training_per_task=a_itp).sum())
 
-        # Step 8: wage bill from ASSIGNED workers only
+        # Step 8: wage bill
+        # K_active tracks assigned workers (t2w >= 0) for display — always computed.
+        # wage_bill diverges from K_active under finite T_review: pay ALL K workers
+        # (employment liability regardless of task assignment). Between reviews, T-mode
+        # workers are employed but unassigned — the firm still owes wages. D-05: this
+        # K_active/wage_bill divergence is intentional (not a bug).
+        # Under T_review=inf: wage_bill = assigned-only (byte-identical to pre-fix).
         active = np.unique(t2w[t2w >= 0])
-        wage_bill = float(firm.workforce.wage[active].sum()) if active.size > 0 else 0.0
+        if math.isfinite(params.T_review):
+            wage_bill = float(firm.workforce.wage.sum()) if firm.workforce.K > 0 else 0.0
+        else:
+            wage_bill = float(firm.workforce.wage[active].sum()) if active.size > 0 else 0.0
 
         # Steps 9-10: total cost and profit
         C = task_costs + wage_bill + params.F + period_adj + period_review_fire_cost + period_hire_cost

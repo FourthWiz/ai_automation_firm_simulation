@@ -239,11 +239,19 @@ def forward_simulate_action_path(
         )
 
         # ------------------------------------------------------------------
-        # Step 6: Cost and profit (assigned-workers-only wage bill)
+        # Step 6: Cost and profit
+        # Wage bill: kernel-symmetric (D-03). Step 0 firings above already updated
+        # f_workforce before we reach this line — f_workforce.K is post-fire here,
+        # identical ordering to the kernel (kernel Step 0 fires BEFORE Step 8).
+        # Under finite T_review: pay ALL K workers (employment liability).
+        # Under T_review=inf: assigned-only wage bill (byte-identical to pre-fix).
         # ------------------------------------------------------------------
-        _n_HA = int(((f_modes == int(Mode.H)) | (f_modes == int(Mode.A))).sum())
-        _K_active = min(_n_HA // params.tasks_per_worker, f_workforce.K)
-        _wage_f = float(f_workforce.wage[:_K_active].sum()) if _K_active > 0 else 0.0
+        if math.isfinite(params.T_review):
+            _wage_f = float(f_workforce.wage.sum()) if f_workforce.K > 0 else 0.0
+        else:
+            _n_HA = int(((f_modes == int(Mode.H)) | (f_modes == int(Mode.A))).sum())
+            _K_active = min(_n_HA // params.tasks_per_worker, f_workforce.K)
+            _wage_f = float(f_workforce.wage[:_K_active].sum()) if _K_active > 0 else 0.0
 
         from firm_ai_abm.adjustment import adj_cost
         cost = (
