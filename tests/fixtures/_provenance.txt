@@ -1,5 +1,5 @@
-git_commit: 828db3842855909c912caf12ca06bd811be1cb9b
+git_commit: f85254d68eab4ab93ee6dc994b6c3644778c4b8c
 git_dirty_files: 0
-capture_time: 2026-05-09T06:06:35.671210+00:00
-stage: 2 (training-memory) — fixtures re-captured after per-worker adj_cost change
-note: Stage 2 adj_cost uses per-worker c_train (not per-task); all_A adj_cost=1.0 (10 workers x 0.1) vs Stage 1 all_A adj_cost=10.0 (100 tasks x 0.1)
+capture_time: 2026-05-14T04:38:59.771676+00:00
+stage: 3 (brute-greedy-use-posteriors) — greedy fixtures re-captured after posteriors wiring
+note: greedy_profit and greedy_with_switching now plan decisions under alpha_hat/beta_hat priors (dp_prior_alpha=0.5, dp_prior_beta=0.7). all_H/all_A/all_T fixtures unchanged (they do not use firm.alpha/beta in scores).

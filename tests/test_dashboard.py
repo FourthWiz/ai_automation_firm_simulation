@@ -614,7 +614,13 @@ class TestCacheHit:
 
 
 def test_README_margin_recipe_at_default_seed():
-    """Stage 5 T-14b: README margin recipe (w=8.0, c_auto=0.6, F=5) hits 5–20% margin."""
+    """Stage 5 T-14b: README margin recipe (w=8.0, c_auto=0.6, F=5) produces a positive margin.
+
+    Recalibrated after brute-greedy-use-posteriors: greedy_profit now plans decisions
+    under alpha_hat/beta_hat priors (dp_prior_alpha=0.5, dp_prior_beta=0.7) rather than
+    peeking at truth (D-01). Margin at seed=0 is ~30.6% under posteriors; range updated
+    to [0.20, 0.45] to guard against sign-flip regressions while allowing for prior variation.
+    """
     from firm_ai_abm.firm import make_firm
     from firm_ai_abm.simulate import run_simulation
     from firm_ai_abm.strategy import greedy_profit
@@ -623,9 +629,10 @@ def test_README_margin_recipe_at_default_seed():
     firm = make_firm(params)
     df = run_simulation(firm, greedy_profit)
     margin = float(df["pi"].mean() / df["Y"].mean())
-    assert 0.05 <= margin <= 0.20, (
+    assert 0.20 <= margin <= 0.45, (
         f"README margin recipe out of range: margin={margin:.3f} ({margin*100:.1f}%). "
-        "If recipe parameters changed, update README and this test together."
+        "If recipe parameters changed, update README and this test together. "
+        "Note: greedy now plans under posteriors (dp_prior_alpha=0.5, dp_prior_beta=0.7)."
     )
 
 
