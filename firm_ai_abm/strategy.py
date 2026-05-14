@@ -25,6 +25,16 @@ from firm_ai_abm.firm import Firm
 from firm_ai_abm.production import Mode, compute_K
 
 
+def _post_or_truth(firm: "Firm"):
+    """Return (alpha, beta) posterior arrays, falling back to truth when priors are unset.
+
+    decisions plan under posterior beliefs (D-01); falls back to truth pre-DP-init
+    """
+    a = firm.alpha_hat if firm.alpha_hat is not None else firm.alpha
+    b = firm.beta_hat  if firm.beta_hat  is not None else firm.beta
+    return a, b
+
+
 def all_H(firm: Firm, t: int) -> np.ndarray:
     """Return a new modes array with all tasks in Human mode (Mode.H = 0)."""
     modes = np.zeros(firm.params.N, dtype=int)
@@ -108,6 +118,8 @@ def greedy_profit(firm: Firm, t: int) -> np.ndarray:
     )
 
     p = firm.params
+    # decisions plan under posterior beliefs (D-01); falls back to truth pre-DP-init
+    a, b = _post_or_truth(firm)
     # CRIT-1 fix: mode-agnostic slot indexing (slot assignment is a workforce property,
     # NOT a mode property). Slot k covers tasks [k*tpw, (k+1)*tpw) regardless of mode.
     slot_idx = np.arange(p.N) // p.tasks_per_worker  # shape (N,)
@@ -120,11 +132,11 @@ def greedy_profit(firm: Firm, t: int) -> np.ndarray:
         worker_wage = firm.workforce.wage[slot_idx_clamped]  # shape (N,)
     wage_per_task = worker_wage / p.tasks_per_worker  # shape (N,)
 
-    score_H = p.q_h - wage_per_task                                     # shape (N,)
-    score_A = p.q_h * (1.0 + p.g * firm.beta) - p.c_aug - wage_per_task  # shape (N,)
+    score_H = p.q_h - wage_per_task                              # shape (N,)
+    score_A = p.q_h * (1.0 + p.g * b) - p.c_aug - wage_per_task  # shape (N,)
     if p.belief_alpha is None:
         # D-05 dormant sentinel — preserve today's behavior bit-for-bit
-        score_T = p.q_a * firm.alpha - p.c_auto                          # shape (N,); no wage
+        score_T = p.q_a * a - p.c_auto                           # shape (N,); no wage
     else:
         # D-04: belief-only scoring on BOTH productivity and cost sides
         wage_per_task_scalar = p.w / p.tasks_per_worker
@@ -240,6 +252,8 @@ def greedy_with_switching(firm: Firm, t: int) -> np.ndarray:
     )
 
     p = firm.params
+    # decisions plan under posterior beliefs (D-01); falls back to truth pre-DP-init
+    a, b = _post_or_truth(firm)
     # CRIT-1 fix: mode-agnostic slot indexing (slot assignment is a workforce property,
     # NOT a mode property). Matches greedy_profit's wage computation exactly (D-04).
     slot_idx = np.arange(p.N) // p.tasks_per_worker  # shape (N,)
@@ -250,11 +264,11 @@ def greedy_with_switching(firm: Firm, t: int) -> np.ndarray:
         worker_wage = firm.workforce.wage[slot_idx_clamped]  # shape (N,)
     wage_per_task = worker_wage / p.tasks_per_worker  # shape (N,)
 
-    score_H = p.q_h - wage_per_task                                     # shape (N,)
-    score_A = p.q_h * (1.0 + p.g * firm.beta) - p.c_aug - wage_per_task  # shape (N,)
+    score_H = p.q_h - wage_per_task                              # shape (N,)
+    score_A = p.q_h * (1.0 + p.g * b) - p.c_aug - wage_per_task  # shape (N,)
     if p.belief_alpha is None:
         # D-05 dormant sentinel — preserve today's behavior bit-for-bit
-        score_T = p.q_a * firm.alpha - p.c_auto                          # shape (N,); no wage
+        score_T = p.q_a * a - p.c_auto                           # shape (N,); no wage
     else:
         # D-04: belief-only scoring on BOTH productivity and cost sides
         wage_per_task_scalar = p.w / p.tasks_per_worker

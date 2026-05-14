@@ -281,12 +281,14 @@ def test_belief_substitution_isolation():
     )
 
     # Compute per-task scores for all modes (replicating strategy internals)
+    # score_A uses beta_hat (posterior) per D-01 — strategy now plans under beliefs.
+    b = firm.beta_hat if firm.beta_hat is not None else firm.beta
     slot_idx = np.arange(p.N) // p.tasks_per_worker
     slot_idx_clamped = np.minimum(slot_idx, firm.workforce.K - 1)
     worker_wage = firm.workforce.wage[slot_idx_clamped]
     wage_per_task = worker_wage / p.tasks_per_worker
     score_H = p.q_h - wage_per_task
-    score_A = p.q_h * (1.0 + p.g * firm.beta) - p.c_aug - wage_per_task
+    score_A = p.q_h * (1.0 + p.g * b) - p.c_aug - wage_per_task
     scores = np.stack([score_H, score_A, expected_score_T], axis=1)
     expected_modes = np.argmax(scores, axis=1).astype(int)
 

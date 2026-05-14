@@ -85,7 +85,7 @@ from firm_ai_abm.dp_optimizer import (
 )
 
 
-def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
+def run_horizon(firm: Firm, strategy: Callable, horizon: int, use_posteriors: bool = False) -> pd.DataFrame:
     """Run `horizon` periods IN-PLACE; return DataFrame of exactly `horizon` rows.
 
     Does NOT call firm.reset(). Does NOT touch firm.history.
@@ -94,10 +94,23 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
 
     Adds step 6 a_in_training_per_task gate and step 11.5 flip when
     firm.params.enable_training_delay is True.
+
+    use_posteriors: when True, realized output is computed under posterior beliefs
+        (alpha_hat / beta_hat with None-fallback to truth). Used by brute's planning
+        projection to avoid peeking at truth (D-01). Default False preserves
+        run_simulation byte-identity (D-03).
     """
     import copy  # noqa: PLC0415 — local import avoids circular at module load
 
     params = firm.params
+
+    # Resolve alpha/beta for productivity_vec once before the loop (D-01 / D-03).
+    if use_posteriors:
+        alpha_use = firm.alpha_hat if firm.alpha_hat is not None else firm.alpha
+        beta_use  = firm.beta_hat  if firm.beta_hat  is not None else firm.beta
+    else:
+        alpha_use = firm.alpha
+        beta_use  = firm.beta
 
     # Pre-loop: allocate per-worker matrices (fresh for this call)
     K_max = params.N // params.tasks_per_worker
@@ -269,7 +282,7 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
             a_itp = None
 
         prod_per_task = productivity_vec(
-            firm.modes, firm.alpha, firm.beta, params,
+            firm.modes, alpha_use, beta_use, params,
             theta_per_task=theta_per_task,
             a_in_training_per_task=a_itp,
         )
@@ -285,6 +298,7 @@ def run_horizon(firm: Firm, strategy: Callable, horizon: int) -> pd.DataFrame:
         # Per-worker aug-cost bookkeeping (D-07: SEPARATE cost_vec call; Step 7 unchanged)
         # T-mode tasks have t2w == -1 → excluded by worker_mask automatically.
         # Training-period A tasks: cost_vec returns 0 → aug_cost recorded as 0.0 (Q-02 / MAJ-5).
+        # cost_vec always uses truth (firm.alpha) per D-02 — costs at simulation time use truth.
         alpha = firm.alpha
         cost_per_task_aug = cost_vec(firm.modes, alpha, params, a_in_training_per_task=a_itp)
         aug_cost_this_period = np.full(firm.workforce.K, np.nan, dtype=np.float64)

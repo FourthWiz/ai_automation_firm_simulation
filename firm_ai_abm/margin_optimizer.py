@@ -163,7 +163,7 @@ def horizon_brute_strategy(firm: Firm, t: int) -> np.ndarray:
 
         for cand in _CANDIDATES:
             firm_copy = copy.deepcopy(firm)
-            proj_df = run_horizon(firm_copy, cand, horizon)
+            proj_df = run_horizon(firm_copy, cand, horizon, use_posteriors=True)
             assert len(proj_df) == horizon, (
                 f"run_horizon returned {len(proj_df)} rows, expected {horizon}"
             )
