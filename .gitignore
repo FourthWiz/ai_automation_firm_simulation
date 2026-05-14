@@ -18,3 +18,6 @@ results/figures/*.svg
 *.jpeg
 .playwright-mcp/
 dev/
+.pytest_cache/
+*.tmp
+simdeploy-snapshot*
