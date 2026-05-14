@@ -348,7 +348,7 @@ def _build_controls() -> tuple:
     hiring_mode = st.radio(
         "Hiring policy",
         options=["off", "enable_hiring", "enable_replenish_hiring"],
-        index=0,
+        index=1,
         key="hiring_mode",
         horizontal=True,
         help="off = no hiring after firing; enable_hiring = immediate refill to K*; "
@@ -384,8 +384,7 @@ def _build_controls() -> tuple:
     with col_c4:
         max_hire_period_val = st.number_input(
             "max_hire_period", min_value=0, max_value=200,
-            # UI default 5 diverges from kernel sentinel 0 (drain entire backlog); user confirmed
-            value=5, step=1, key="max_hire_period",
+            value=3, step=1, key="max_hire_period",
             help="Per-period hire cap from backlog. 0 = drain entire backlog in one period.",
             disabled=(hiring_mode == "off"),
         )

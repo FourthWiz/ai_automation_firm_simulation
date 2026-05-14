@@ -16,16 +16,16 @@ class FirmParams:
     g: float = 0.5               # augmentation gain (key dial)
 
     # Costs
-    w: float = 1.0               # wage per worker per period (numeraire)
-    c_aug: float = 0.05          # per-task augmentation cost
-    c_auto: float = 0.4          # per-task automation cost (key dial)
+    w: float = 2.0               # wage per worker per period
+    c_aug: float = 0.20          # per-task augmentation cost
+    c_auto: float = 0.10         # per-task automation cost (key dial)
     c_fire: float = 2.0          # firing cost per worker (lumpy, K-based)
     c_hire: float = 0.5          # hiring cost per worker (lumpy, K-based)
     c_train: float = 0.1         # training cost per H->A task (per-task)
     F: float = 5.0               # fixed cost per period
 
     # Prices
-    p: float = 0.22              # output price (recalibrated; tpw=5, p=0.22 → all-H baseline ≈ −3/period)
+    p: float = 0.56              # output price (w=2.0, c_aug=0.20 → all-A ≈ 5000 total over T=60)
 
     # Strategy
     n_amortize: int = 6          # horizon for greedy-with-switching amortization
@@ -34,7 +34,7 @@ class FirmParams:
     seed: int | None = None      # if set, reproducible alpha/beta sampling
 
     # Worker heterogeneity (Phase 1.5 Stage 1)
-    sigma_theta: float = 0.2     # std of log-normal productivity draws; 0 → homogeneous
+    sigma_theta: float = 0.3     # std of log-normal productivity draws; 0 → homogeneous
     theta_min: float = 0.4       # lower clip for theta
     theta_max: float = 1.6       # upper clip for theta
     corr_w_theta: float = 0.3    # elasticity exponent in wage = w * (theta^c / mean(theta^c)) * exp(eps - sigma_w^2/2); NOT a Pearson r
@@ -51,7 +51,7 @@ class FirmParams:
                                     # (defaults to 0.0 = fire negative-surplus workers)
 
     # Phase 1.5 Stage 6 — opt-in post-firing rehire to K_target = K0
-    enable_hiring: bool = False
+    enable_hiring: bool = True
 
     # Training delay (Phase 1.5 Stage 6 — dormant by default)
     enable_training_delay: bool = False  # when True, H->A workers produce as H for 1 period before aug kicks in
@@ -60,14 +60,14 @@ class FirmParams:
     scenario_mode: str = "price"   # "price" or "margin"
     target_margin: float = 0.05    # target (revenue - cost) / revenue when scenario_mode == "margin"
     margin_horizon: int = 5        # look-ahead periods for margin-optimizer brute grid
-    dp_prior_alpha: float = 0.5    # Bayesian prior mean for alpha_hat at run start (automatability prior)
-    dp_prior_beta: float = 0.7    # Bayesian prior mean for beta_hat at run start (augmentability prior)
+    dp_prior_alpha: float = 0.85   # Bayesian prior mean for alpha_hat at run start (automatability prior)
+    dp_prior_beta: float = 1.0    # Bayesian prior mean for beta_hat at run start (augmentability prior)
 
     # Phase 1.5 Stage X — opt-in replenishment hiring (augment-replenish-hiring)
     # Dormant by default (enable_replenish_hiring=False). Mutually exclusive with
     # enable_hiring — both True raises ValueError at make_firm (validated in firm.py).
     enable_replenish_hiring: bool = False  # when True, fired workers are queued for rehire after hire_delay_periods
-    max_hire_period: int = 0               # per-period hire cap; 0 = drain entire backlog in one period (sentinel)
+    max_hire_period: int = 3               # per-period hire cap; 0 = drain entire backlog in one period (sentinel)
     hire_delay_periods: int = 1            # periods to wait before hiring back fired workers (>=1)
     max_hire_per_step: int = 0             # planning action-grid hire cap; 0 = hire-axis degenerates to {0} (byte-parity)
                                            # distinct from max_hire_period (kernel drain-cap) — this controls the planner grid
@@ -90,7 +90,7 @@ class FirmParams:
     # Default (0.5, 2.0) is the Uniform(0,1) special case (Beta(1,1)) — the
     # sampler short-circuits to rng.uniform(0,1) on exact equality with these
     # defaults to preserve byte-identity with Phase 1 parquet fixtures.
-    alpha_mean: float = 0.5
-    alpha_concentration: float = 2.0
-    beta_mean: float = 0.5
-    beta_concentration: float = 2.0
+    alpha_mean: float = 0.40
+    alpha_concentration: float = 3.0
+    beta_mean: float = 0.80
+    beta_concentration: float = 3.0
