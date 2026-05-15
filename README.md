@@ -6,7 +6,6 @@ Agent-based simulation of tech firms responding to AI. Firms choose between huma
 
 An interactive browser-based version of this simulation is available. The dashboard lets you explore how a single firm navigates the human-vs-AI production decision in real time.
 
-![Dashboard screenshot](docs/dashboard.png)
 
 **What it shows:**
 
@@ -50,14 +49,6 @@ Dashboard (adds Streamlit):
 
 Opens at `http://localhost:8501`. Primary controls (strategy, firm size, AI productivity, wages, costs) are in the main panel. An **Advanced parameters** expander below holds 24 additional controls. Click **▶ Run simulation** to run; 13 charts update across 5 tabs.
 
-## Validate
-
-```bash
-.venv/bin/python validate_tier_a.py
-```
-
-Runs the Phase 1 validation checks (constant baseline, greedy dominance, monotonicity, numeraire invariance, adjustment cost integration).
-
 ## Test
 
 ```bash
@@ -89,12 +80,3 @@ At default sigmas (`sigma_theta=0.2`, `sigma_w=0.05`), `firing_threshold=0.0` pr
 **Multi-batch wage drift note:**
 
 In high-turnover scenarios (many fire+replace cycles), `wage_bill` may drift slightly from the `w*K` baseline due to sampling variance. Reduce `sigma_w` or `sigma_theta` to minimize drift.
-
-## Design docs
-
-- [`00_overview.md`](00_overview.md) — project overview and research questions
-- [`01_phase1_single_firm.md`](01_phase1_single_firm.md) — Phase 1 single-firm model
-- [`02_phase2_two_firms.md`](02_phase2_two_firms.md) — Phase 2 two-firm competition
-- [`03_phase3_market.md`](03_phase3_market.md) — Phase 3 N-firm market
-- [`04_phase4_welfare_writeup.md`](04_phase4_welfare_writeup.md) — Phase 4 welfare metrics
-- [`CLAUDE.md`](CLAUDE.md) — codebase conventions and tech stack
