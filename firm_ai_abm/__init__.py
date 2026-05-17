@@ -6,11 +6,34 @@ from firm_ai_abm.adjustment import adj_cost
 from firm_ai_abm.strategy import (
     all_H, all_A, all_T, greedy_profit, greedy_with_switching,
 )
-from firm_ai_abm.simulate import run_simulation, run_horizon
-from firm_ai_abm.workers import Workforce, sample_workforce, task_to_worker_map, _make_initial_workforce
-from firm_ai_abm.review import firing_review, apply_firings, replace_to_target  # Stage 5 D-12: apply_firings_and_replace removed; split into apply_firings + replace_to_target
-from firm_ai_abm.dp_optimizer import dp_rolling_horizon_strategy  # F-03 DP optimizer
-from firm_ai_abm.margin_optimizer import horizon_brute_strategy   # F-03 legacy brute alias
+# PEP 562 lazy import — T-00 (avoid DP/margin transitive load in embed kernel)
+# simulate.py:82 directly imports dp_optimizer, so we must also lazy-load the
+# simulate symbols to ensure bare `import firm_ai_abm` stays dp_optimizer-clean.
+# When embed_app.py later does `from firm_ai_abm.simulate import run_simulation`,
+# dp_optimizer will load — that's documented in the T-00 honest-scope note.
+_LAZY = {
+    "run_simulation":                "firm_ai_abm.simulate",
+    "run_horizon":                   "firm_ai_abm.simulate",
+    "Workforce":                     "firm_ai_abm.workers",
+    "sample_workforce":              "firm_ai_abm.workers",
+    "task_to_worker_map":            "firm_ai_abm.workers",
+    "_make_initial_workforce":       "firm_ai_abm.workers",
+    "firing_review":                 "firm_ai_abm.review",
+    "apply_firings":                 "firm_ai_abm.review",
+    "replace_to_target":             "firm_ai_abm.review",
+    "dp_rolling_horizon_strategy":   "firm_ai_abm.dp_optimizer",
+    "horizon_brute_strategy":        "firm_ai_abm.margin_optimizer",
+}
+
+def __getattr__(name):
+    if name in _LAZY:
+        import importlib
+        mod = importlib.import_module(_LAZY[name])
+        value = getattr(mod, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module 'firm_ai_abm' has no attribute {name!r}")
+
 __all__ = [
     "FirmParams",
     "Firm",
