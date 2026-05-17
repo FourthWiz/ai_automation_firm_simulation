@@ -46,7 +46,10 @@ def test_default_via_make_firm_byte_identical():
         pytest.skip(f"Fixture not found: {fixture_path}")
 
     fixture = np.load(fixture_path)
-    firm = make_firm(FirmParams(seed=0, N=100))
+    # Pin pre-99ddaea alpha/beta defaults: old defaults were alpha_mean=0.5, alpha_conc=2.0,
+    # beta_mean=0.5, beta_conc=2.0 (99ddaea changed these to 0.4/3.0 and 0.8/3.0).
+    firm = make_firm(FirmParams(seed=0, N=100, alpha_mean=0.5, alpha_concentration=2.0,
+                                beta_mean=0.5, beta_concentration=2.0))
     assert np.array_equal(firm.alpha, fixture["alpha"]), (
         "make_firm alpha not byte-identical to pre-change fixture"
     )

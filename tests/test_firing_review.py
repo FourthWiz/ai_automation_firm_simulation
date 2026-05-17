@@ -791,10 +791,13 @@ def test_enable_hiring_restores_headcount():
       - firm.workforce.K <= K0 after run
       - pi shows no runaway negative cost (sanity)
     """
+    # Pin w=1.0 (pre-99ddaea default) so hiring is profitable at p=0.22:
+    # p*tpw - w = 0.22*5 - 1.0 = 0.1 > 0 → optimal_hire_target returns K* > 0.
+    # With w=2.0 (new default): p*tpw - w = -0.9 < 0 → denominator negative → no hires.
     params = FirmParams(
         N=100, T=60, tasks_per_worker=5,
         T_review=10.0, firing_threshold=0.0,
-        p=0.22, seed=0,
+        p=0.22, w=1.0, seed=0,
         sigma_theta=0.2, sigma_w=0.05,
         enable_hiring=True,
         hire_delay_periods=1,
@@ -1143,6 +1146,10 @@ def test_hiring_oscillation_bounded():
     Also detects sustained full-fire flip-flop: no 3+ consecutive review ticks
     with n_review_fired == K0 (structural oscillation detector).
     """
+    # Pin w=1.0 so p*tpw - w = 0.22*5 - 1.0 = 0.1 > 0 → hiring profitable (new default w=2.0 breaks this).
+    # Pin max_hire_period=0 (drain full backlog in one period) to match pre-99ddaea behavior.
+    # With max_hire_period=3 (new default), slow backlog drain can leave K low enough that all
+    # workers are fired at the next review tick before recovery, causing K=0 indefinitely.
     params = FirmParams(
         N=100,
         T=30,
@@ -1150,12 +1157,14 @@ def test_hiring_oscillation_bounded():
         T_review=5.0,
         firing_threshold=0.0,
         p=0.22,
+        w=1.0,
         F=5.0,
         seed=0,
         sigma_theta=0.2,
         sigma_w=0.05,
         enable_hiring=True,
         hire_delay_periods=1,  # pin explicitly; delay semantics: hires drain at t+1
+        max_hire_period=0,     # drain full backlog in one period (pre-99ddaea default)
     )
     K0 = params.N // params.tasks_per_worker  # 20
     firm = make_firm(params)

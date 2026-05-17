@@ -472,8 +472,15 @@ def check7_phase1_parity(firm_factory) -> tuple[bool, dict]:
             continue
 
         df1 = pd.read_parquet(fixture_path)
-        params = FirmParams(seed=0, N=100, sigma_theta=0.0, sigma_w=0.0, tasks_per_worker=10, p=1.0)
-        firm = make_firm(params)
+        # Pin fixture-capture params (w, c_auto, alpha/beta_mean changed in 99ddaea).
+        params7 = FirmParams(
+            seed=0, N=100, sigma_theta=0.0, sigma_w=0.0,
+            tasks_per_worker=10, p=1.0,
+            w=1.0, c_aug=0.05, c_auto=0.4, enable_hiring=False,
+            alpha_mean=0.5, alpha_concentration=2.0,
+            beta_mean=0.5, beta_concentration=2.0,
+        )
+        firm = make_firm(params7)
         df15 = run_simulation(firm, strat)
 
         max_dev_per_col: dict[str, float] = {}
@@ -575,8 +582,15 @@ def check8_stage3_neutrality(firm_factory) -> tuple[bool, dict]:
             continue
 
         df_fixture = pd.read_parquet(fixture_path)
-        # D-11: T_review=math.inf is the default — explicit here for documentation intent
-        params = FirmParams(seed=0, N=100, sigma_theta=0.0, sigma_w=0.0, T_review=_math.inf, tasks_per_worker=10, p=1.0)
+        # D-11: T_review=math.inf is the default — explicit here for documentation intent.
+        # Pin fixture-capture params (w, c_auto, alpha/beta_mean changed in 99ddaea).
+        params = FirmParams(
+            seed=0, N=100, sigma_theta=0.0, sigma_w=0.0,
+            T_review=_math.inf, tasks_per_worker=10, p=1.0,
+            w=1.0, c_aug=0.05, c_auto=0.4, enable_hiring=False,
+            alpha_mean=0.5, alpha_concentration=2.0,
+            beta_mean=0.5, beta_concentration=2.0,
+        )
         firm = make_firm(params)
         df_s3 = run_simulation(firm, strat)
 
@@ -782,7 +796,7 @@ def check11_replenish_numeraire(firm_factory) -> tuple[bool, dict]:
         sigma_theta=0.0, sigma_w=0.0,
         T=20, T_review=10.0,
         firing_threshold=0.0,
-        enable_replenish_hiring=True,
+        enable_hiring=False, enable_replenish_hiring=True,
         max_hire_period=0,
         hire_delay_periods=1,
     )

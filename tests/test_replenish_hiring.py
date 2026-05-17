@@ -28,7 +28,7 @@ def _params_with_firings(**kwargs) -> FirmParams:
         seed=0, N=100, sigma_theta=0.0, sigma_w=0.0,
         T=40, T_review=10.0, firing_threshold=0.0,
         p=0.22, tasks_per_worker=5,
-        enable_replenish_hiring=True,
+        enable_hiring=False, enable_replenish_hiring=True,
         max_hire_period=0,
         hire_delay_periods=1,
     )
@@ -186,21 +186,21 @@ def test_mutual_exclusion_both_true():
 
 def test_mutual_exclusion_delay_zero():
     """enable_replenish_hiring=True with hire_delay_periods=0 → ValueError."""
-    params = FirmParams(enable_replenish_hiring=True, hire_delay_periods=0)
+    params = FirmParams(enable_hiring=False, enable_replenish_hiring=True, hire_delay_periods=0)
     with pytest.raises(ValueError, match="hire_delay_periods must be >= 1"):
         make_firm(params)
 
 
 def test_mutual_exclusion_negative_max_hire():
     """enable_replenish_hiring=True with max_hire_period=-1 → ValueError."""
-    params = FirmParams(enable_replenish_hiring=True, max_hire_period=-1)
+    params = FirmParams(enable_hiring=False, enable_replenish_hiring=True, max_hire_period=-1)
     with pytest.raises(ValueError, match="max_hire_period must be >= 0"):
         make_firm(params)
 
 
 def test_dormant_no_validation():
-    """enable_replenish_hiring=False skips validation → no error even with invalid shape params."""
-    params = FirmParams(enable_replenish_hiring=False, hire_delay_periods=0, max_hire_period=-1)
+    """enable_replenish_hiring=False and enable_hiring=False skips validation → no error even with invalid shape params."""
+    params = FirmParams(enable_hiring=False, enable_replenish_hiring=False, hire_delay_periods=0, max_hire_period=-1)
     firm = make_firm(params)  # must not raise
     assert firm is not None
 
