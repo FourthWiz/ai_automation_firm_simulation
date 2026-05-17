@@ -6,11 +6,8 @@ from firm_ai_abm.adjustment import adj_cost
 from firm_ai_abm.strategy import (
     all_H, all_A, all_T, greedy_profit, greedy_with_switching,
 )
-# PEP 562 lazy import — T-00 (avoid DP/margin transitive load in embed kernel)
-# simulate.py:82 directly imports dp_optimizer, so we must also lazy-load the
-# simulate symbols to ensure bare `import firm_ai_abm` stays dp_optimizer-clean.
-# When embed_app.py later does `from firm_ai_abm.simulate import run_simulation`,
-# dp_optimizer will load — that's documented in the T-00 honest-scope note.
+# PEP 562 lazy import — keep bare `import firm_ai_abm` cheap and DP-free for
+# scripts that only need the kernel + strategies.
 _LAZY = {
     "run_simulation":                "firm_ai_abm.simulate",
     "run_horizon":                   "firm_ai_abm.simulate",
