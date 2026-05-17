@@ -38,7 +38,7 @@ def test_embed_app_runs_default():
     # (at.exception covers this — if query_params came first, AppTest would raise)
     assert len(at.button) == 1, "Expected exactly 1 Run button"
     assert len(at.slider) == 4, f"Expected 4 sliders, got {len(at.slider)}"
-    assert len(at.radio) == 1, "Expected exactly 1 strategy radio"
+    assert len(at.radio) == 2, "Expected 2 radios (strategy + hiring mode)"
 
 
 def test_embed_app_set_page_config_first():
@@ -86,20 +86,32 @@ def test_embed_app_run_button_produces_charts():
 
 
 def test_embed_app_strategy_whitelist():
-    """Radio options are exactly the three allowed strategies — no DP optimizer.
+    """Strategy radio shows all 7 strategies including brute/DP (with browser perf warning).
 
-    D-03 + R-13: embed whitelist = greedy_with_switching, all_H, all_T.
-    horizon_optimizer (DP) is intentionally NOT present (too slow under Pyodide).
+    all_A is included (third core mode). horizon_brute and horizon_optimizer are
+    included with a UI warning — users can choose them knowing they're slow in-browser.
     """
     at = AppTest.from_file(EMBED_APP)
     at.run()
     assert not at.exception
-    radio = at.radio[0]
-    assert list(radio.options) == ["greedy_with_switching", "all_H", "all_T"], (
-        f"Strategy whitelist changed: {radio.options}"
+    strategy_radio = at.radio[0]
+    expected = [
+        "greedy_with_switching",
+        "greedy_profit",
+        "all_A",
+        "all_H",
+        "all_T",
+        "horizon_brute",
+        "horizon_optimizer",
+    ]
+    assert list(strategy_radio.options) == expected, (
+        f"Strategy list changed: {strategy_radio.options}"
     )
-    assert "horizon_optimizer" not in radio.options, (
-        "horizon_optimizer must NOT appear in embed strategy radio (D-03)"
+    # Hiring mode radio is the second radio
+    assert len(at.radio) == 2, f"Expected 2 radios (strategy + hiring), got {len(at.radio)}"
+    hiring_radio = at.radio[1]
+    assert list(hiring_radio.options) == ["off", "enable_hiring", "enable_replenish_hiring"], (
+        f"Hiring mode options changed: {hiring_radio.options}"
     )
 
 

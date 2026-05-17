@@ -1,23 +1,13 @@
 """
 Slim embed entrypoint for the FirmBehavior in-browser simulator.
 
-This file is loaded by stlite (Streamlit-in-browser via Pyodide) at
-https://igorban.ai/sim. It is NOT a replacement for app.py — it is a
-deliberate subset: 4 sliders, 1 strategy radio, Run button, 2 charts.
+Loaded by stlite (Streamlit-in-browser via Pyodide) at https://igorban.ai/sim.
+Exposes the same 6 strategies as the full app plus the 3 hiring modes.
+Widget keys are suffixed `_embed` to avoid colliding with test_app.py contracts.
 
-Why separate from app.py:
-  - app.py has 36 params, 15 charts, and all strategies including the DP
-    optimizer. Running the DP optimizer under Pyodide would take 5–30 s per
-    click (Pyodide is 2–4× slower for numpy, ~10× for Python loops).
-  - This file exposes only greedy_with_switching / all_H / all_T — all O(N)
-    per step, well under 2 s under Pyodide.
-  - Widget keys are suffixed `_embed` so they cannot collide with
-    tests/test_app.py's widget-key contract.
-
-Why DP optimizer is excluded (D-03):
-  dp_rolling_horizon_strategy enumerates 25^5 paths × T=60 periods × N=500
-  numpy ops. That is too slow under Pyodide. The DP strategy remains
-  available in the full Streamlit app on HF Spaces.
+Performance note: horizon_brute and horizon_optimizer (DP) run fine on a laptop
+but are 5–30× slower under Pyodide (Python loops ≈10× slower than native).
+A warning is shown when one of these is selected.
 """
 
 # === MODULE IMPORTS (pure Python imports — not Streamlit commands) ===
@@ -26,36 +16,44 @@ from firm_ai_abm.theme import THEME
 from firm_ai_abm.config import FirmParams
 from firm_ai_abm.firm import make_firm
 from firm_ai_abm.simulate import run_simulation
-from firm_ai_abm.strategy import all_H, all_T, greedy_with_switching
+from firm_ai_abm.strategy import all_H, all_A, all_T, greedy_profit, greedy_with_switching
+from firm_ai_abm.margin_optimizer import horizon_brute_strategy
+from firm_ai_abm.dp_optimizer import dp_rolling_horizon_strategy
 from firm_ai_abm.dashboard import (
     fig_pi_per_period_over_time,
     fig_mode_mix_area,
 )
 
-# === STREAMLIT PAGE CONFIG — MUST BE THE FIRST st.* CALL (round-2 MAJ-10, round-3 CRIT-1) ===
-# All st.* calls (including st.query_params reads) MUST follow st.set_page_config.
+_STRATEGIES = {
+    "greedy_with_switching": greedy_with_switching,
+    "greedy_profit":         greedy_profit,
+    "all_A":                 all_A,
+    "all_H":                 all_H,
+    "all_T":                 all_T,
+    "horizon_brute":         horizon_brute_strategy,
+    "horizon_optimizer":     dp_rolling_horizon_strategy,
+}
+
+_SLOW = {"horizon_brute", "horizon_optimizer"}
+
+# === STREAMLIT PAGE CONFIG — MUST BE THE FIRST st.* CALL ===
 st.set_page_config(page_title="Firm Behavior — slim sim",
                    layout="centered", initial_sidebar_state="collapsed")
 
 # === THEME OVERRIDE (D-06) — runs AFTER set_page_config ===
-# Only mutate fields that apply_theme() reads: layout_defaults + font.
-# THEME["colors"] is informational and NOT read by apply_theme — do not touch it.
 qp = st.query_params
 _theme = qp.get("theme", "light")
 if _theme == "dark":
     THEME["layout_defaults"]["plot_bgcolor"]  = "#1b1d22"
     THEME["layout_defaults"]["paper_bgcolor"] = "#1b1d22"
     THEME["font"]["color"]                    = "#ecedef"
-else:  # light (default)
+else:
     THEME["layout_defaults"]["plot_bgcolor"]  = "#fdfdfd"
     THEME["layout_defaults"]["paper_bgcolor"] = "#fdfdfd"
-    THEME["font"]["color"]                    = "#1f2328"  # site --foreground light
+    THEME["font"]["color"]                    = "#1f2328"
 
-# Optional round-2 MIN-6 cosmetic: match site body font (uncomment to enable)
-# THEME["font"]["family"] = "IBM Plex Serif, serif"
-
-st.markdown("### Firm Behavior — try a slim version")
-st.caption("4 dials. Hit Run. See profit and task-mode mix evolve. "
+st.markdown("### Firm Behavior — try the simulator")
+st.caption("Adjust params. Hit Run. Compare strategies. "
            "[Open the full simulator ↗](https://<HF-SPACE-URL>)")
 
 c1, c2 = st.columns(2)
@@ -63,22 +61,56 @@ with c1:
     q_a    = st.slider("AI productivity ceiling (q_a)", 0.0, 3.0, 1.2, 0.05, key="q_a_embed")
     c_auto = st.slider("Automation cost per task (c_auto)", 0.0, 2.0, 0.10, 0.05, key="c_auto_embed")
 with c2:
-    g  = st.slider("Augmentation gain (g)", 0.0, 3.0, 0.5, 0.05, key="g_embed")
-    w  = st.slider("Wage rate (w)", 0.0, 5.0, 2.0, 0.1, key="w_embed")
+    g = st.slider("Augmentation gain (g)", 0.0, 3.0, 0.5, 0.05, key="g_embed")
+    w = st.slider("Wage rate (w)", 0.0, 5.0, 2.0, 0.1, key="w_embed")
 
-# D-03: DP optimizer intentionally EXCLUDED (too slow under Pyodide).
-strategy_name = st.radio("Strategy",
-    options=["greedy_with_switching", "all_H", "all_T"],
-    horizontal=True, index=0, key="strategy_embed",
-    captions=["smart greedy", "all human", "all automated"])
+strategy_name = st.radio(
+    "Strategy",
+    options=list(_STRATEGIES.keys()),
+    index=0,
+    horizontal=True,
+    key="strategy_embed",
+    captions=[
+        "smart greedy (switching costs)",
+        "myopic greedy (no switching cost)",
+        "all augmented",
+        "all human",
+        "all automated",
+        "brute horizon (slow in browser)",
+        "DP optimizer (slow in browser)",
+    ],
+)
+
+hiring_mode = st.radio(
+    "Hiring mode",
+    options=["off", "enable_hiring", "enable_replenish_hiring"],
+    index=0,
+    horizontal=True,
+    key="hiring_mode_embed",
+    captions=[
+        "no rehiring after firing",
+        "refill immediately to K*",
+        "delayed backlog refill",
+    ],
+)
+
+if strategy_name in _SLOW:
+    st.warning(
+        f"**{strategy_name}** uses search/DP loops that run 5–30× slower under "
+        "Pyodide (browser WebAssembly). Expect 15–60 s. "
+        "Use the [full simulator](https://<HF-SPACE-URL>) for repeated DP runs.",
+        icon="⚠️",
+    )
 
 if st.button("Run", type="primary", key="run_embed"):
-    params = FirmParams(q_a=q_a, g=g, c_auto=c_auto, w=w,
-                        T=60, N=500, seed=0)
+    params = FirmParams(
+        q_a=q_a, g=g, c_auto=c_auto, w=w,
+        T=60, N=500, seed=0,
+        enable_hiring=(hiring_mode == "enable_hiring"),
+        enable_replenish_hiring=(hiring_mode == "enable_replenish_hiring"),
+    )
     firm = make_firm(params)
-    strat = {"greedy_with_switching": greedy_with_switching,
-             "all_H": all_H, "all_T": all_T}[strategy_name]
-    df = run_simulation(firm, strat)
+    df = run_simulation(firm, _STRATEGIES[strategy_name])
 
     tab1, tab2 = st.tabs(["Profit over time", "Task mode mix"])
     with tab1:
@@ -89,7 +121,3 @@ if st.button("Run", type="primary", key="run_embed"):
 
     cum = float(df["pi"].cumsum().iloc[-1])
     st.metric("Cumulative profit (60 periods)", f"{cum:.2f}")
-
-# Round-3 MAJ-4: postMessage live-theme bridge REMOVED. streamlit_javascript is dead
-# (latest v0.1.5 published May 2022 — no releases since). v1 ships reload-only:
-# initial theme via ?theme= read above; site toggle reloads /sim?theme=<new>.
