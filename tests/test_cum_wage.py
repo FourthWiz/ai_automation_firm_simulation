@@ -155,13 +155,15 @@ def test_TN6_byte_parity_dormant_path():
     """T-N6: Dormant-path byte-parity — existing pi/Y/C/K columns unchanged after adding mean_accum_wage."""
     from firm_ai_abm import validate
 
+    # Pin pre-99ddaea defaults to match fixture-capture state (see test_alpha_cost_function.py).
     firm_factory = lambda: make_firm(
         FirmParams(
-            seed=0,
-            sigma_theta=0.0,
-            sigma_w=0.0,
-            tasks_per_worker=10,
-            p=1.0,
+            seed=0, N=100,
+            sigma_theta=0.0, sigma_w=0.0,
+            tasks_per_worker=10, p=1.0,
+            w=1.0, c_aug=0.05, c_auto=0.4, enable_hiring=False,
+            alpha_mean=0.5, alpha_concentration=2.0,
+            beta_mean=0.5, beta_concentration=2.0,
         )
     )
     passed, details = validate.check7_phase1_parity(firm_factory)

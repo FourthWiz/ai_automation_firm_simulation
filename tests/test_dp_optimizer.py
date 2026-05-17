@@ -551,7 +551,7 @@ def test_alpha_cost_engaged_path_uses_alpha_hat():
 
 def test_forward_sim_pending_hires_tuple_shape():
     """Forward sim handles pending_hires as list[tuple[int, int]] — no TypeError."""
-    params = FirmParams(seed=0, N=50, enable_replenish_hiring=True, T_review=10,
+    params = FirmParams(seed=0, N=50, enable_hiring=False, enable_replenish_hiring=True, T_review=10,
                         hire_delay_periods=1)
     firm = make_firm(params)
 
@@ -745,7 +745,7 @@ def test_runs_at_N500_under_6_seconds_with_action_grid():
     params = FirmParams(
         seed=0, N=500, T=20,
         T_review=5.0,
-        enable_replenish_hiring=True,
+        enable_hiring=False, enable_replenish_hiring=True,
         max_hire_per_step=4,
         hire_delay_periods=2,
         max_hire_period=5,

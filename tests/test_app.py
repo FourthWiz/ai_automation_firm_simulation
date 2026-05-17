@@ -75,8 +75,8 @@ def test_cache_key_length():
     assert key[-1] == 0, f"key[-1] should be seed=0, got {key[-1]}"
 
 
-def test_hiring_mode_radio_defaults_off():
-    """D-01: hiring_mode radio replaces two checkboxes; defaults to 'off'."""
+def test_hiring_mode_radio_defaults_enable_hiring():
+    """hiring_mode radio defaults to 'enable_hiring' (index=1, per Scenario B recalibration 99ddaea)."""
     try:
         from streamlit.testing.v1 import AppTest
     except ImportError:
@@ -87,8 +87,8 @@ def test_hiring_mode_radio_defaults_off():
     assert "hiring_mode" in radios, (
         f"hiring_mode radio not found. Available radio keys: {list(radios.keys())}"
     )
-    assert radios["hiring_mode"].value == "off", (
-        f"hiring_mode should default to 'off', got {radios['hiring_mode'].value}"
+    assert radios["hiring_mode"].value == "enable_hiring", (
+        f"hiring_mode should default to 'enable_hiring', got {radios['hiring_mode'].value}"
     )
 
 
@@ -106,17 +106,17 @@ def test_replenish_hiring_toggle_changes_cache_key():
 
     at = AppTest.from_file("app.py", default_timeout=30).run()
 
-    # Step 1: assert default radio state
+    # Step 1: assert default radio state (enable_hiring per Scenario B recalibration 99ddaea)
     radios = {r.key: r for r in at.radio}
     assert "hiring_mode" in radios, (
         f"hiring_mode radio not found. Keys: {list(radios.keys())}"
     )
-    assert radios["hiring_mode"].value == "off"
+    assert radios["hiring_mode"].value == "enable_hiring"
 
-    # Step 2: read default DRAFT_PARAMS_DEBUG — inline mapping yields both False
+    # Step 2: read default DRAFT_PARAMS_DEBUG — inline mapping: enable_hiring=True, replenish=False
     dp_default = at.session_state["DRAFT_PARAMS_DEBUG"]
-    assert dp_default.enable_hiring is False, (
-        f"default enable_hiring should be False, got {dp_default.enable_hiring}"
+    assert dp_default.enable_hiring is True, (
+        f"default enable_hiring should be True (Scenario B), got {dp_default.enable_hiring}"
     )
     assert dp_default.enable_replenish_hiring is False, (
         f"default enable_replenish_hiring should be False, got {dp_default.enable_replenish_hiring}"

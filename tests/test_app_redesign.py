@@ -229,12 +229,12 @@ def test_reset_button_restores_defaults():
         "kernel default is math.inf — deliberately diverges per D-04 two-defaults seam)"
     )
 
-    # Also check max_hire_period (UI default 5, NOT kernel sentinel 0 — confirmed R-09)
+    # Also check max_hire_period (UI default 3 per Scenario B recalibration 99ddaea)
     max_hire_after = next((inp for inp in at.number_input if inp.key == "max_hire_period"), None)
     assert max_hire_after is not None
-    assert int(max_hire_after.value) == 5, (
-        f"max_hire_period not restored: got {max_hire_after.value}, expected 5 "
-        "(UI default 5 diverges from kernel sentinel 0; user confirmed per R-09)"
+    assert int(max_hire_after.value) == 3, (
+        f"max_hire_period not restored: got {max_hire_after.value}, expected 3 "
+        "(UI default 3 per Scenario B recalibration; kernel default is 3 post-99ddaea)"
     )
 
     # Also check tasks_per_worker (UI default == FirmParams default, no divergence)

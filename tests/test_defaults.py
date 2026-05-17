@@ -17,18 +17,18 @@ from firm_ai_abm.strategy import all_H, greedy_profit
 
 
 def test_default_human_baseline_is_mildly_positive():
-    """At new defaults (N=500, tpw=5, p=0.22, K=100, F=5.0), all-H mean profit is ≈ +5.0.
+    """At Scenario B defaults (N=500, tpw=5, p=0.56, w=2.0, K=100, F=5.0), all-H mean profit is ≈ +75.0.
 
-    Closed-form: per-period pi = 0.22*500 − 1*100 − 5.0 = 5.0.
-    atol=0.2 catches recalibration drift larger than ~4% (sigma>0 adds noise).
+    Closed-form: per-period pi = p*N - w*K - F = 0.56*500 - 2.0*100 - 5.0 = 75.0.
+    atol=2.0 catches recalibration drift (sigma=0 → homogeneous, should be exact).
     """
     params = FirmParams(seed=0, sigma_theta=0.0, sigma_w=0.0)
     firm = make_firm(params)
     df = run_simulation(firm, all_H)
     mean_pi = float(df["pi"].mean())
-    assert np.isclose(mean_pi, 5.0, atol=0.2), (
-        f"Default all-H baseline should be ≈ +5.0 at N=500. "
-        f"mean_pi={mean_pi:.4f}. If this fails, N default or price may have changed."
+    assert np.isclose(mean_pi, 75.0, atol=2.0), (
+        f"Default all-H baseline should be ≈ +75.0 at Scenario B params. "
+        f"mean_pi={mean_pi:.4f}. If this fails, price/wage/N defaults may have changed."
     )
 
 
@@ -61,8 +61,8 @@ def test_default_firing_threshold_no_fires_all_H_at_tpw5():
 # def test_default_firing_threshold_greedy_fires(): ...
 
 
-def test_enable_hiring_default_is_false():
-    """T-02: enable_hiring defaults to False (dormant per lessons-learned 2026-05-09)."""
-    assert FirmParams().enable_hiring is False, (
-        "enable_hiring must default to False to preserve fixture byte-parity and opt-in semantics"
+def test_enable_hiring_default_is_true():
+    """enable_hiring defaults to True (Scenario B recalibration, commit 99ddaea)."""
+    assert FirmParams().enable_hiring is True, (
+        "enable_hiring must default to True per Scenario B recalibration (99ddaea)"
     )

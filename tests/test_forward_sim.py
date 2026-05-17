@@ -30,6 +30,7 @@ def _make_firm(seed=42, N=50, T_review=math.inf, enable_replenish_hiring=False,
     p = FirmParams(
         N=N, T=20, seed=seed,
         T_review=T_review,
+        enable_hiring=False,  # pin off; mutually exclusive with enable_replenish_hiring
         enable_replenish_hiring=enable_replenish_hiring,
         hire_delay_periods=hire_delay_periods,
         sigma_theta=sigma_theta,

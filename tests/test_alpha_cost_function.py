@@ -35,13 +35,13 @@ from firm_ai_abm.validate import SCALED_PARAMS
 def test_cost_vec_three_anchor_calibration():
     """T-08: cost_vec engaged path satisfies all three calibration anchors at (2.0, 2.0).
 
-    Calibration at w=1, tpw=5, c_auto=0.4 (unchanged project default):
+    Calibration at w=1, tpw=5 (c_auto not used in engaged-path formula per D-01):
         wage_per_task = 0.2
         c(0.0) = 0.2 * (2.0 - 0.0) = 0.40 > 0.20  anchor 1: above w/tpw
         c(0.5) = 0.2 * (2.0 - 1.0) = 0.20 == 0.20  anchor 2: exact equality
         c(1.0) = 0.2 * (2.0 - 2.0) = 0.00 < 0.20   anchor 3: floor triggered
 
-    c_auto=0.4 is the project default and is NOT used in the engaged-path formula (D-01).
+    c_auto is NOT used in the engaged-path formula (D-01).
     The sentinel at the top guards against a silent c_auto=0.0 regression.
     """
     params = FirmParams(
@@ -52,9 +52,8 @@ def test_cost_vec_three_anchor_calibration():
         tasks_per_worker=5,
     )
     # MIN-5: guard against silent regression where c_auto is set to 0.0
-    assert params.c_auto == 0.4, (
-        "c_auto must remain at project default 0.4; setting it to 0.0 would let the "
-        "engaged path trivially pass"
+    assert params.c_auto > 0.0, (
+        "c_auto must be > 0; setting it to 0.0 would let the engaged path trivially pass"
     )
 
     wage_per_task = params.w / params.tasks_per_worker  # 0.2
@@ -105,13 +104,20 @@ def test_fixture_byte_parity_dormant(name, strategy):
     """T-09: dormant default is byte-identical to Stage-1/2/3 parquet fixtures.
 
     Runs run_simulation under the params matching fixture capture (sigma_theta=0,
-    sigma_w=0 for homogeneous workers; tasks_per_worker=10, p=1.0 as at capture time)
+    sigma_w=0 for homogeneous workers; tasks_per_worker=10, p=1.0, w=1.0,
+    enable_hiring=False, alpha/beta_mean=0.5 as at capture time — see commit 6f13c39)
     and compares all 6 columns to the fixture. np.array_equal enforces byte identity.
     """
     fixture_path = f"{_FIXTURE_DIR}/{_STRATEGY_FIXTURE_MAP[name]}"
     fixture = pd.read_parquet(fixture_path)
 
-    firm = make_firm(FirmParams(seed=0, N=100, tasks_per_worker=10, p=1.0, sigma_theta=0.0, sigma_w=0.0))
+    # Pin params to fixture-capture state (defaults changed in 99ddaea recalibration).
+    firm = make_firm(FirmParams(
+        seed=0, N=100, tasks_per_worker=10, p=1.0, sigma_theta=0.0, sigma_w=0.0,
+        w=1.0, c_aug=0.05, c_auto=0.4, enable_hiring=False,
+        alpha_mean=0.5, alpha_concentration=2.0,
+        beta_mean=0.5, beta_concentration=2.0,
+    ))
     df = run_simulation(firm, strategy)
 
     result_vals = df[_COLS].values
@@ -192,6 +198,13 @@ def test_belief_vs_realized_wedge_smoke():
         c_auto_alpha_slope=2.0,
         seed=0,
         p=1.0,  # use p=1.0 to keep revenues meaningful for this test
+        # Pin pre-99ddaea defaults. dp_prior_alpha=0.5 keeps alpha_hat=0.5 → net_score_T=0.783
+        # < score_H=0.80, so dormant path stays at H-mode (workers survive).
+        # dp_prior_alpha=0.85 (post-99ddaea) → net_score_T=1.658 >> H, firing everyone in both paths.
+        w=1.0, c_auto=0.4, enable_hiring=False,
+        dp_prior_alpha=0.5, dp_prior_beta=0.7,
+        alpha_mean=0.5, alpha_concentration=2.0,
+        beta_mean=0.5, beta_concentration=2.0,
     )
     # Dormant baseline: realized alpha used for both strategy scoring and cost
     params_sym = FirmParams(**base_kwargs, belief_alpha=None)
