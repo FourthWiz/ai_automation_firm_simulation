@@ -69,8 +69,8 @@ def test_tabs_present():
 
     Note: at.tabs returns ALL tabs including the 6 advanced-expander tabs
     (total 12). The plot tabs are always the last 6 in render order.
-    Advanced tabs (D-05): Costs | Strategy & pricing | Heterogeneity |
-                          Firing (advanced) | Productivity baseline | Reproducibility
+    Advanced tabs: Costs | Strategy & pricing | Heterogeneity |
+                   Firing & hiring | Productivity baseline | Reproducibility
     Plot tabs: Outcomes | Workforce | Tasks & modes | Wages | Worker heterogeneity | Compare strategies
     """
     at = _get_at()
@@ -85,7 +85,7 @@ def test_tabs_present():
     advanced_tabs = all_tabs[:6]
     expected_advanced_labels = [
         "Costs", "Strategy & pricing", "Heterogeneity",
-        "Firing (advanced)", "Productivity baseline", "Reproducibility",
+        "Firing & hiring", "Productivity baseline", "Reproducibility",
     ]
     actual_advanced_labels = [t.label for t in advanced_tabs]
     assert actual_advanced_labels == expected_advanced_labels, (
