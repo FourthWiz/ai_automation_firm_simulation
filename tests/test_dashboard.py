@@ -590,7 +590,7 @@ class TestCacheHit:
         assert not at.exception
         start_ts = self._get_timestamp(at)
 
-        # Find the q_a slider by key (moved to main panel)
+        # Find the q_a slider by key (in Advanced > Productivity baseline tab)
         q_a_slider = next((s for s in at.slider if s.key == "q_a"), None)
         assert q_a_slider is not None, "Could not find q_a slider by key"
 

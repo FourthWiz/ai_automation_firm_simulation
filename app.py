@@ -252,22 +252,22 @@ def _build_controls() -> tuple:
     Advanced controls are inside an expander below the primary bar.
 
     Layout:
-      Row A: strategy (non-adv radio) | T | N
-      Row B: q_a | g | c_auto | w
-      Row C: tasks_per_worker | T_review | hire_delay_periods | max_hire_period
+      Row A: strategy (non-adv radio) | T | N | tasks_per_worker
       Hiring policy radio (D-01 mutex)
       Advanced expander (6 tabs):
-        Costs | Strategy & pricing | Worker heterogeneity |
-        Firing (advanced) | Productivity baseline | Reproducibility
+        Costs (+ w, c_auto) | Strategy & pricing | Worker heterogeneity |
+        Firing & hiring (+ T_review, hire_delay_periods, max_hire_period, max_hire_per_step) |
+        Productivity baseline (+ q_a, g) | Reproducibility
 
     Returns:
         (strategy_name: str, params_key: tuple[31 scalars], draft_params: FirmParams)
     """
     # ------------------------------------------------------------------
-    # Row A: strategy radio | T | N
-    # Single unified strategy chooser with all 5 options. Default = horizon_optimizer (resolved by name).
+    # Row A: strategy radio | T | N | tasks_per_worker
+    # tasks_per_worker defined here BEFORE the Advanced expander so
+    # that firing_threshold_kernel conversion inside the expander can use it (R-01).
     # ------------------------------------------------------------------
-    col_a1, col_a2, col_a3 = st.columns([2, 1, 1])
+    col_a1, col_a2, col_a3, col_a4 = st.columns([2, 1, 1, 1])
 
     with col_a1:
         strategy = st.radio(
@@ -311,53 +311,16 @@ def _build_controls() -> tuple:
             key="N",
         )
 
-    # ------------------------------------------------------------------
-    # Row B: q_a | g | c_auto | w
-    # ------------------------------------------------------------------
-    col_b1, col_b2, col_b3, col_b4 = st.columns([1, 1, 1, 1])
-
-    with col_b1:
-        q_a = st.slider(
-            "AI productivity ceiling (q_a)",
-            0.0, 3.0, float(FirmParams().q_a), 0.05,
-            help="Automation productivity multiplier",
-            key="q_a",
-        )
-
-    with col_b2:
-        g = st.slider(
-            "Augmentation gain (g)",
-            0.0, 3.0, float(FirmParams().g), 0.05,
-            help="Augmentation gain parameter",
-            key="g",
-        )
-
-    with col_b3:
-        c_auto = st.slider(
-            "Automation cost per task (c_auto)",
-            0.0, 2.0, float(FirmParams().c_auto), 0.05,
-            help="Automation cost per task",
-            key="c_auto",
-        )
-
-    with col_b4:
-        w = st.slider(
-            "Wage rate (w)",
-            0.0, 5.0, float(FirmParams().w), 0.1,
-            help="Wage rate",
-            key="w",
+    with col_a4:
+        tasks_per_worker = st.number_input(
+            "Tasks per worker", min_value=1, max_value=100,
+            value=FirmParams().tasks_per_worker, step=1,
+            help="K_workforce = N / tasks_per_worker", key="tasks_per_worker",
         )
 
     # ------------------------------------------------------------------
-    # Row C: tasks_per_worker | T_review | hire_delay_periods | max_hire_period
-    # D-04: reclaimed from p/target_margin (moved to Advanced).
-    # NOTE: tasks_per_worker is defined here BEFORE the Advanced expander so
-    # that firing_threshold_kernel conversion inside the expander can use it (R-01).
+    # Hiring policy radio (D-01 mutex) — hire sub-controls are in Advanced
     # ------------------------------------------------------------------
-    # D-01: hiring_mode radio must also be defined before Row C so that
-    # hire_delay_periods and max_hire_period disabled-state can reference it.
-    # Render hiring_mode first, then row C.
-
     hiring_mode = st.radio(
         "Hiring policy",
         options=["off", "enable_hiring", "enable_replenish_hiring"],
@@ -368,65 +331,35 @@ def _build_controls() -> tuple:
              "enable_replenish_hiring = delayed backlog refill (mutually exclusive)",
     )
 
-    col_c1, col_c2, col_c3, col_c4, col_c5 = st.columns([1, 1, 1, 1, 1])
-
-    with col_c1:
-        tasks_per_worker = st.number_input(
-            "Tasks per worker", min_value=1, max_value=100,
-            value=FirmParams().tasks_per_worker, step=1,
-            help="K_workforce = N / tasks_per_worker", key="tasks_per_worker",
-        )
-
-    with col_c2:
-        T_REVIEW_OPTIONS = [5, 10, 20, 30, "inf"]
-        T_review_choice = st.select_slider(
-            "T_review", options=T_REVIEW_OPTIONS,
-            value=FirmParams().T_review,  # seam closed: UI default matches FirmParams default
-            help="Periodic firing review interval ('inf' = disabled)", key="T_review",
-        )
-        T_review_value = math.inf if T_review_choice == "inf" else float(T_review_choice)
-
-    with col_c3:
-        hire_delay_periods_val = st.number_input(
-            "hire_delay_periods", min_value=1, max_value=20,
-            value=FirmParams().hire_delay_periods, step=1, key="hire_delay_periods",
-            help="Periods to wait before hiring back fired workers. Active only when enable_replenish_hiring=True.",
-            disabled=(hiring_mode != "enable_replenish_hiring"),
-        )
-
-    with col_c4:
-        max_hire_period_val = st.number_input(
-            "max_hire_period", min_value=0, max_value=200,
-            value=3, step=1, key="max_hire_period",
-            help="Per-period hire cap from backlog. 0 = drain entire backlog in one period.",
-            disabled=(hiring_mode == "off"),
-        )
-
-    with col_c5:
-        max_hire_per_step_val = st.number_input(
-            "max_hire_per_step", min_value=0, max_value=50,
-            value=0, step=1, key="max_hire_per_step",
-            help="Planner action-grid hire cap per step. 0 = hire-axis degenerates to {0} (byte-parity). "
-                 "Active only when enable_replenish_hiring=True.",
-            disabled=(hiring_mode != "enable_replenish_hiring"),
-        )
-
     # ------------------------------------------------------------------
     # Advanced expander: 6 tabs
-    # D-05: new tab list — Run length and Firing & hiring tabs replaced
+    # q_a, g → Productivity baseline; c_auto, w → Costs
+    # T_review + hire controls → Firing & hiring
     # ------------------------------------------------------------------
     with st.expander("Advanced parameters", expanded=False):
         adv_tabs = st.tabs([
             "Costs",
             "Strategy & pricing",
             "Heterogeneity",
-            "Firing (advanced)",
+            "Firing & hiring",
             "Productivity baseline",
             "Reproducibility",
         ])
 
-        # Costs (unchanged)
+        # Costs: includes c_auto and w (moved from main panel)
         with adv_tabs[0]:
+            w = st.slider(
+                "Wage rate (w)",
+                0.0, 5.0, float(FirmParams().w), 0.1,
+                help="Wage rate",
+                key="w",
+            )
+            c_auto = st.slider(
+                "Automation cost per task (c_auto)",
+                0.0, 2.0, float(FirmParams().c_auto), 0.05,
+                help="Automation cost per task",
+                key="c_auto",
+            )
             c_aug = st.slider("c_aug", 0.0, 1.0, float(FirmParams().c_aug), 0.01,
                               help="Augmentation cost per task", key="c_aug")
             c_fire = st.slider("c_fire", 0.0, 10.0, float(FirmParams().c_fire), 0.1,
@@ -543,8 +476,16 @@ def _build_controls() -> tuple:
                 help="Wage noise std dev", key="sigma_w",
             )
 
-        # Firing (advanced): only firing_threshold remains; T_review/hiring moved to non-adv
+        # Firing & hiring: T_review, firing_threshold, hire sub-controls
         with adv_tabs[3]:
+            T_REVIEW_OPTIONS = [5, 10, 20, 30, "inf"]
+            T_review_choice = st.select_slider(
+                "T_review", options=T_REVIEW_OPTIONS,
+                value=FirmParams().T_review,  # seam closed: UI default matches FirmParams default
+                help="Periodic firing review interval ('inf' = disabled)", key="T_review",
+            )
+            T_review_value = math.inf if T_review_choice == "inf" else float(T_review_choice)
+
             # firing_threshold_ui is in per-task-output units.
             # UI range [-1.0, 1.0] maps to kernel range [-tpw, tpw].
             firing_threshold_ui = st.slider(
@@ -557,14 +498,47 @@ def _build_controls() -> tuple:
                 key="firing_threshold",
             )
             # Convert UI (per-task) → kernel (per-worker) by multiplying by tasks_per_worker.
-            # tasks_per_worker is defined in non-advanced Row C above (R-01 ordering).
+            # tasks_per_worker is defined in Row A above (R-01 ordering).
             firing_threshold_kernel = float(firing_threshold_ui) * int(tasks_per_worker)
 
-        # Productivity baseline (unchanged)
+            st.markdown("**Hiring sub-controls**")
+            hire_delay_periods_val = st.number_input(
+                "hire_delay_periods", min_value=1, max_value=20,
+                value=FirmParams().hire_delay_periods, step=1, key="hire_delay_periods",
+                help="Periods to wait before hiring back fired workers. Active only when enable_replenish_hiring=True.",
+                disabled=(hiring_mode != "enable_replenish_hiring"),
+            )
+            max_hire_period_val = st.number_input(
+                "max_hire_period", min_value=0, max_value=200,
+                value=3, step=1, key="max_hire_period",
+                help="Per-period hire cap from backlog. 0 = drain entire backlog in one period.",
+                disabled=(hiring_mode == "off"),
+            )
+            max_hire_per_step_val = st.number_input(
+                "max_hire_per_step", min_value=0, max_value=50,
+                value=0, step=1, key="max_hire_per_step",
+                help="Planner action-grid hire cap per step. 0 = hire-axis degenerates to {0} (byte-parity). "
+                     "Active only when enable_replenish_hiring=True.",
+                disabled=(hiring_mode != "enable_replenish_hiring"),
+            )
+
+        # Productivity baseline: includes q_a and g (moved from main panel)
         with adv_tabs[4]:
             q_h = st.slider(
                 "q_h", 0.0, 3.0, float(FirmParams().q_h), 0.05,
                 help="Human productivity per task", key="q_h",
+            )
+            q_a = st.slider(
+                "AI productivity ceiling (q_a)",
+                0.0, 3.0, float(FirmParams().q_a), 0.05,
+                help="Automation productivity multiplier",
+                key="q_a",
+            )
+            g = st.slider(
+                "Augmentation gain (g)",
+                0.0, 3.0, float(FirmParams().g), 0.05,
+                help="Augmentation gain parameter",
+                key="g",
             )
             enable_training_delay_val = st.checkbox(
                 "enable_training_delay",
