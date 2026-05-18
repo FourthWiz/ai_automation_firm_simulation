@@ -1,5 +1,5 @@
 ---
-title: Firm Behavior Under AI
+title: Firm Behavior Under AI Transformation
 emoji: 🤖
 colorFrom: indigo
 colorTo: green
