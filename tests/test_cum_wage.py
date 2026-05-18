@@ -162,6 +162,7 @@ def test_TN6_byte_parity_dormant_path():
             sigma_theta=0.0, sigma_w=0.0,
             tasks_per_worker=10, p=1.0,
             w=1.0, c_aug=0.05, c_auto=0.4, enable_hiring=False,
+            T_review=math.inf,
             alpha_mean=0.5, alpha_concentration=2.0,
             beta_mean=0.5, beta_concentration=2.0,
         )

@@ -493,19 +493,19 @@ class TestAppSmoke:
                 )
 
     def test_main_panel_has_13_plots(self):
-        """P1-11.2: Main panel renders 15 plotly charts (as UnknownElement in AppTest).
+        """P1-11.2: Main panel renders 16 plotly charts (as UnknownElement in AppTest).
 
         P1-2a spike result: st.plotly_chart → UnknownElement; tabs expose inner content
-        in at.main. Empirical count = 15 UnknownElements (post F-02: alpha + beta
-        histograms add 2 to tab_modes; tabs layout 2+3+4+4+2 = 15).
+        in at.main. Empirical count = 16 UnknownElements (post T-09: compare chart adds 1
+        to tab_out; tabs layout 3+3+4+4+2 = 16).
         Verified on Streamlit 1.45.
         """
         from streamlit.testing.v1 import AppTest
         at = AppTest.from_file("app.py", default_timeout=60).run()
         assert not at.exception
         unknown_count = sum(1 for el in at.main if type(el).__name__ == "UnknownElement")
-        assert unknown_count == 15, (
-            f"Expected 15 st.plotly_chart (UnknownElement) in main panel, got {unknown_count}"
+        assert unknown_count == 16, (
+            f"Expected 16 st.plotly_chart (UnknownElement) in main panel, got {unknown_count}"
         )
 
     def test_footer_caption_content(self):
@@ -625,7 +625,11 @@ def test_README_margin_recipe_at_default_seed():
     from firm_ai_abm.simulate import run_simulation
     from firm_ai_abm.strategy import greedy_profit
 
-    params = FirmParams(seed=0, w=8.0, c_auto=0.6, F=5, tasks_per_worker=10, p=1.0)
+    # Pin T_review=math.inf and alpha_mean=0.40 to preserve recipe behavior from when
+    # this test was written (defaults changed in narrative-default-calibration: T_review=10.0,
+    # alpha_mean=0.20 — low alpha_mean collapses greedy's T-mode bet at high w).
+    params = FirmParams(seed=0, w=8.0, c_auto=0.6, F=5, tasks_per_worker=10, p=1.0,
+                        T_review=math.inf, alpha_mean=0.40)
     firm = make_firm(params)
     df = run_simulation(firm, greedy_profit)
     margin = float(df["pi"].mean() / df["Y"].mean())

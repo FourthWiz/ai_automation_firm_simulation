@@ -37,6 +37,7 @@ flat segment at boundary grid points. The phase-doc wording "monotonically
 increases" is interpreted as weakly monotone per stage-three plan §Decisions.
 """
 
+import math
 import os
 import subprocess
 from dataclasses import fields, replace
@@ -472,11 +473,13 @@ def check7_phase1_parity(firm_factory) -> tuple[bool, dict]:
             continue
 
         df1 = pd.read_parquet(fixture_path)
-        # Pin fixture-capture params (w, c_auto, alpha/beta_mean changed in 99ddaea).
+        # Pin fixture-capture params (w, c_auto, alpha/beta_mean changed in 99ddaea;
+        # T_review pinned to inf since default changed in narrative-default-calibration).
         params7 = FirmParams(
             seed=0, N=100, sigma_theta=0.0, sigma_w=0.0,
             tasks_per_worker=10, p=1.0,
             w=1.0, c_aug=0.05, c_auto=0.4, enable_hiring=False,
+            T_review=math.inf,
             alpha_mean=0.5, alpha_concentration=2.0,
             beta_mean=0.5, beta_concentration=2.0,
         )

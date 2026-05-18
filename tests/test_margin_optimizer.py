@@ -36,6 +36,13 @@ def _make_firm(target_margin: float = 0.0, horizon: int = 5, **kwargs) -> object
         target_margin=target_margin,
         margin_horizon=horizon,
         p=1.0,
+        # Pin pre-narrative-default-calibration defaults:
+        #   alpha_mean 0.40 — tests rely on T-mode dominance (q_a*alpha >> q_h at 0.40);
+        #                     at alpha_mean=0.20, q_a*alpha ≈ q_h and that assumption breaks.
+        #   T_review=inf    — margin strategy tests don't exercise the firing-review path;
+        #                     T_review=10.0 default shifts RNG and affects run_horizon behavior.
+        alpha_mean=0.40,
+        T_review=math.inf,
         **kwargs,
     )
     return make_firm(params)

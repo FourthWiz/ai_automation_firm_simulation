@@ -132,7 +132,7 @@ def test_tab_het_sigma_theta_zero_renders():
     """P1-11.14: tab_het with sigma_theta=0 still renders 2 charts (degenerate inputs).
 
     P1-6 chose option (b): render both charts with empty inputs when sigma_theta=0.
-    This preserves the 15-plot count (post F-02: alpha + beta histograms add 2) regardless of sigma_theta value.
+    This preserves the 16-plot count (post T-09: compare chart adds 1) regardless of sigma_theta value.
     """
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_file("app.py", default_timeout=60).run()
@@ -145,10 +145,10 @@ def test_tab_het_sigma_theta_zero_renders():
     run_btn = _find_run_btn(at)
     at = run_btn.click().run()
     assert not at.exception
-    # Plot count should still be 15 (degenerate empty charts; post F-02: alpha + beta histograms add 2)
+    # Plot count should still be 16 (degenerate empty charts; post T-09: compare chart adds 1)
     unknown_count = sum(1 for el in at.main if type(el).__name__ == "UnknownElement")
-    assert unknown_count == 15, (
-        f"Expected 15 UnknownElements with sigma_theta=0, got {unknown_count}"
+    assert unknown_count == 16, (
+        f"Expected 16 UnknownElements with sigma_theta=0, got {unknown_count}"
     )
 
 
@@ -156,8 +156,8 @@ def test_reset_button_restores_defaults():
     """P1-11.14: Reset button restores all primary controls to FirmParams defaults.
 
     Changes 5 widgets to non-default values, clicks Reset, then verifies
-    each returns to its FirmParams default. Uses sigma_theta instead of T_review
-    (T_review widget speaks strings while FirmParams.T_review = math.inf).
+    each returns to its FirmParams default. T_review UI default now matches
+    FirmParams().T_review = 10.0 (two-defaults seam closed by T-08).
     """
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_file("app.py", default_timeout=60).run()
@@ -221,12 +221,12 @@ def test_reset_button_restores_defaults():
         f"sigma_theta not restored: got {sigma_after.value}, expected {defaults.sigma_theta}"
     )
 
-    # Also check T_review select_slider (UI default 5, NOT "inf" — two-defaults seam: D-04)
+    # Also check T_review select_slider (UI default == FirmParams().T_review == 10.0; seam closed T-08)
     t_review_after = next((s for s in at.select_slider if s.key == "T_review"), None)
     assert t_review_after is not None
-    assert t_review_after.value == 5, (
-        f"T_review not restored: got {t_review_after.value}, expected 5 (UI default; "
-        "kernel default is math.inf — deliberately diverges per D-04 two-defaults seam)"
+    assert t_review_after.value == 10, (
+        f"T_review not restored: got {t_review_after.value}, expected 10 "
+        "(UI default matches FirmParams().T_review = 10.0 since T-08 seam closure)"
     )
 
     # Also check max_hire_period (UI default 3 per Scenario B recalibration 99ddaea)

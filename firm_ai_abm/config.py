@@ -25,7 +25,7 @@ class FirmParams:
     F: float = 5.0               # fixed cost per period
 
     # Prices
-    p: float = 0.56              # output price (w=2.0, c_aug=0.20 → all-A ≈ 5000 total over T=60)
+    p: float = 0.56              # output price (w=2.0, c_aug=0.20 → p*N - w*K - F = 75.0/period at alpha_mean=0.20)
 
     # Strategy
     n_amortize: int = 6          # horizon for greedy-with-switching amortization
@@ -41,12 +41,11 @@ class FirmParams:
     sigma_w: float = 0.05        # multiplicative log-noise std on individual wage
 
     # Phase 1.5 Stage 3 — periodic firing review
-    T_review: float = math.inf   # review every T_review periods; math.inf (default) disables the path
-                                  # entirely — set to e.g. 10.0 to enable.
+    T_review: float = 10.0       # review every T_review periods; math.inf disables the path entirely.
                                   # FLOAT-typed to support math.inf (disabled path). int(T_review) is
-                                  # used internally for modulo arithmetic. Default math.inf means the
-                                  # periodic firing review is disabled by default — opt in by setting
-                                  # T_review=10.0 (or any finite value).
+                                  # used internally for modulo arithmetic. Default 10.0 enables the
+                                  # periodic firing review — set to math.inf to disable.
+                                  # Defaults provenance: see nondistributable/narrative-default-calibration-results.md
     firing_threshold: float = 0.0  # fire workers with surplus < firing_threshold
                                     # (defaults to 0.0 = fire negative-surplus workers)
 
@@ -68,7 +67,8 @@ class FirmParams:
     # enable_hiring — both True raises ValueError at make_firm (validated in firm.py).
     enable_replenish_hiring: bool = False  # when True, fired workers are queued for rehire after hire_delay_periods
     max_hire_period: int = 3               # per-period hire cap; 0 = drain entire backlog in one period (sentinel)
-    hire_delay_periods: int = 1            # periods to wait before hiring back fired workers (>=1)
+    hire_delay_periods: int = 3            # periods to wait before hiring back fired workers (>=1)
+                                           # Defaults provenance: see nondistributable/narrative-default-calibration-results.md
     max_hire_per_step: int = 0             # planning action-grid hire cap; 0 = hire-axis degenerates to {0} (byte-parity)
                                            # distinct from max_hire_period (kernel drain-cap) — this controls the planner grid
     enable_horizon_brute_action_grid: bool = False  # when True, horizon_brute_strategy searches full (n_fire,n_aug,n_hire) action grid
@@ -90,7 +90,8 @@ class FirmParams:
     # Default (0.5, 2.0) is the Uniform(0,1) special case (Beta(1,1)) — the
     # sampler short-circuits to rng.uniform(0,1) on exact equality with these
     # defaults to preserve byte-identity with Phase 1 parquet fixtures.
-    alpha_mean: float = 0.40
+    # Defaults provenance: see nondistributable/narrative-default-calibration-results.md
+    alpha_mean: float = 0.20
     alpha_concentration: float = 3.0
     beta_mean: float = 0.80
     beta_concentration: float = 3.0

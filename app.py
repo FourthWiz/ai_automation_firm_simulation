@@ -58,6 +58,7 @@ from firm_ai_abm.dashboard import (
     fig_mean_accum_wage_over_time,
     fig_alpha_histogram,
     fig_beta_histogram,
+    fig_multi_strategy_compare,
 )
 from firm_ai_abm.production import Mode
 
@@ -167,6 +168,7 @@ ALL_WIDGET_KEYS = (
     "hire_delay_periods", "max_hire_period", "max_hire_per_step",
     "enable_training_delay",
     "alpha_mean", "alpha_concentration", "beta_mean", "beta_concentration",
+    "compare_strategies",
 )
 
 # ---------------------------------------------------------------------------
@@ -368,7 +370,7 @@ def _build_controls() -> tuple:
         T_REVIEW_OPTIONS = [5, 10, 20, 30, "inf"]
         T_review_choice = st.select_slider(
             "T_review", options=T_REVIEW_OPTIONS,
-            value=5,  # UI default 5 differs from FirmParams().T_review = math.inf (two-defaults seam)
+            value=FirmParams().T_review,  # seam closed: UI default matches FirmParams default
             help="Periodic firing review interval ('inf' = disabled)", key="T_review",
         )
         T_review_value = math.inf if T_review_choice == "inf" else float(T_review_choice)
@@ -376,7 +378,7 @@ def _build_controls() -> tuple:
     with col_c3:
         hire_delay_periods_val = st.number_input(
             "hire_delay_periods", min_value=1, max_value=20,
-            value=1, step=1, key="hire_delay_periods",
+            value=FirmParams().hire_delay_periods, step=1, key="hire_delay_periods",
             help="Periods to wait before hiring back fired workers. Active only when enable_replenish_hiring=True.",
             disabled=(hiring_mode != "enable_replenish_hiring"),
         )
@@ -463,7 +465,8 @@ def _build_controls() -> tuple:
                 0.0, 1.0, float(FirmParams().dp_prior_alpha), 0.05,
                 help=(
                     "Bayesian prior mean for task automatability (alpha_hat) at run start. "
-                    "Used only by horizon_optimizer. Default 0.5 matches the alpha distribution mean."
+                    "Used only by horizon_optimizer. Default 0.85 exceeds the alpha distribution mean "
+                    "(alpha_mean=0.20), making the optimizer overestimate automatability at run start."
                 ),
                 key="dp_prior_alpha",
             )
@@ -485,7 +488,7 @@ def _build_controls() -> tuple:
                 "alpha_mean (automatability — Beta dist mean)",
                 0.0, 1.0, float(FirmParams().alpha_mean), 0.05,
                 help="Mean of the Beta(a, b) distribution from which task automatability "
-                     "alpha is drawn. Default 0.5 with concentration=2 is Uniform(0,1).",
+                     "alpha is drawn. Default 0.20 with concentration=3 skews tasks toward low automatability.",
                 key="alpha_mean",
             )
             alpha_concentration = st.slider(
@@ -654,6 +657,12 @@ def main() -> None:
     # ------------------------------------------------------------------
     # P1-7: Run button + Reset button
     # ------------------------------------------------------------------
+    compare_strategies = st.checkbox(
+        "Compare strategies (All Human / Greedy / Horizon Optimizer)",
+        value=True,
+        key="compare_strategies",
+        help="Show a three-strategy cumulative profit comparison in the Outcomes tab.",
+    )
     run_col, reset_col = st.columns([3, 1])
     with run_col:
         run_clicked = st.button("▶ Run simulation", type="primary", key="run_button")
@@ -763,6 +772,21 @@ def main() -> None:
     with tab_out:
         st.plotly_chart(fig_pi_per_period_over_time(df), width="stretch", key="fig_pi_period")
         st.plotly_chart(fig_pi_over_time(df), width="stretch", key="fig_pi_cumul")
+
+        if compare_strategies:
+            _COMPARE_STRATEGIES = ["all_H", "greedy_with_switching", "horizon_optimizer"]
+            comparison_histories = {}
+            for _cmp_strat in _COMPARE_STRATEGIES:
+                try:
+                    _cmp_result = run_cached(active_key, _cmp_strat)
+                    comparison_histories[_cmp_strat] = _cmp_result[0]
+                except Exception:
+                    pass
+            if comparison_histories:
+                st.plotly_chart(
+                    fig_multi_strategy_compare(comparison_histories),
+                    width="stretch", key="fig_compare",
+                )
 
     with tab_work:
         st.plotly_chart(fig_K_over_time(df), width="stretch", key="fig_K")

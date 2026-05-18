@@ -188,7 +188,7 @@ def test_calendar_constraint_no_fire_on_non_review():
 
 def test_calendar_constraint_T_review_inf():
     """With T_review=inf, n_review_fired must be 0 for all periods."""
-    params = FirmParams(seed=0, N=50, T=30)  # T_review defaults to math.inf
+    params = FirmParams(seed=0, N=50, T=30, T_review=math.inf)
     firm = make_firm(params)
     df = run_simulation(firm, dp_rolling_horizon_strategy)
     assert df["n_review_fired"].sum() == 0, (
@@ -706,8 +706,9 @@ def test_byte_parity_dormant_defaults():
     when all guards are disabled (T_review=inf, enable_replenish_hiring=False,
     max_hire_per_step=0, enable_horizon_brute_action_grid=False).
     """
-    # Canonical defaults (no new flags)
-    params_a = FirmParams(seed=42, N=50, T=20)
+    # Canonical defaults (no new flags) — pin T_review=inf so this test is not
+    # affected by the FirmParams default changing from inf to 10.0
+    params_a = FirmParams(seed=42, N=50, T=20, T_review=math.inf)
     firm_a = make_firm(params_a)
     df_a = run_simulation(firm_a, dp_rolling_horizon_strategy)
 

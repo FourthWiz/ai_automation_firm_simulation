@@ -11,6 +11,8 @@ Tests the per-worker training gate introduced in Stage 2:
 
 Run with: .venv/bin/python -m pytest tests/test_training_memory.py -v
 """
+import math
+
 import numpy as np
 import pytest
 from dataclasses import replace
@@ -44,10 +46,12 @@ def _make_workforce(K: int, a_trained_mask: np.ndarray | None = None) -> Workfor
 def _make_params(N: int = 100, K_implicit: int = 10, **kwargs) -> FirmParams:
     """Return FirmParams with tasks_per_worker = N // K_implicit and given overrides.
 
-    Pins p=1.0 by default to preserve Stage 1–2 fixtures.
+    Pins p=1.0 and T_review=math.inf by default to preserve Stage 1–2 fixtures.
+    T_review=math.inf: adj_cost charges fire_cost only when T_review=inf (finite T_review
+    delegates firing to the periodic review gate — adj_cost would double-charge otherwise).
     """
     tpw = N // K_implicit
-    defaults = {"p": 1.0}
+    defaults = {"p": 1.0, "T_review": math.inf}
     defaults.update(kwargs)
     return FirmParams(N=N, tasks_per_worker=tpw, sigma_theta=0.0, sigma_w=0.0, **defaults)
 

@@ -673,3 +673,52 @@ def fig_mean_accum_wage_over_time(df: pd.DataFrame) -> go.Figure:
         yaxis_title="cumulative wages",
     )
     return apply_theme(fig)
+
+
+# Strategy display names and fixed colors for multi-strategy comparison.
+_STRATEGY_DISPLAY = {
+    "all_H": "All Human",
+    "greedy_with_switching": "Greedy",
+    "horizon_optimizer": "Horizon Optimizer",
+}
+_STRATEGY_COLORS = {
+    "all_H": THEME["colors"]["H"],
+    "greedy_with_switching": THEME["colors"]["T"],
+    "horizon_optimizer": THEME["colors"]["A"],
+}
+
+
+def fig_multi_strategy_compare(histories: dict) -> go.Figure:
+    """Cumulative profit comparison across strategies.
+
+    Input:
+        histories: dict mapping strategy name → run_simulation DataFrame.
+                   Each DataFrame must have columns 't' and 'pi'.
+    Output:
+        Figure with one cumulative-profit line per strategy, zero reference line,
+        and legend. Returns an empty figure with a note if histories is empty.
+    """
+    fig = go.Figure()
+    if not histories:
+        fig.add_annotation(text="No strategies to compare.", showarrow=False,
+                           font=dict(size=14, color=THEME["colors"]["neutral"]))
+        return apply_theme(fig)
+
+    for strategy_name, df in histories.items():
+        color = _STRATEGY_COLORS.get(strategy_name, THEME["colors"]["neutral"])
+        label = _STRATEGY_DISPLAY.get(strategy_name, strategy_name)
+        cum_pi = df["pi"].cumsum()
+        fig.add_trace(go.Scatter(
+            x=df["t"], y=cum_pi,
+            mode="lines",
+            line=dict(color=color, width=2.0),
+            name=label,
+        ))
+
+    fig.add_hline(y=0, line=dict(color="lightgray", width=0.8, dash="dash"))
+    fig.update_layout(
+        title="Cumulative Profit by Strategy",
+        xaxis_title="period",
+        yaxis_title="cumulative profit",
+    )
+    return apply_theme(fig)

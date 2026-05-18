@@ -9,6 +9,7 @@ Covers T-08 through T-13 from the unknown-alpha-cost-model plan:
   T-13  — belief-substitution isolation: score_T is a constant vector
 """
 import dataclasses
+import math
 
 import numpy as np
 import pandas as pd
@@ -111,10 +112,11 @@ def test_fixture_byte_parity_dormant(name, strategy):
     fixture_path = f"{_FIXTURE_DIR}/{_STRATEGY_FIXTURE_MAP[name]}"
     fixture = pd.read_parquet(fixture_path)
 
-    # Pin params to fixture-capture state (defaults changed in 99ddaea recalibration).
+    # Pin params to fixture-capture state (defaults changed in 99ddaea and narrative-default-calibration).
     firm = make_firm(FirmParams(
         seed=0, N=100, tasks_per_worker=10, p=1.0, sigma_theta=0.0, sigma_w=0.0,
         w=1.0, c_aug=0.05, c_auto=0.4, enable_hiring=False,
+        T_review=math.inf,
         alpha_mean=0.5, alpha_concentration=2.0,
         beta_mean=0.5, beta_concentration=2.0,
     ))

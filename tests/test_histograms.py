@@ -93,10 +93,10 @@ class TestHistogramsInApp:
             "RUN_COUNTER_VAL_THIS_RUN not set — initial run did not happen"
         )
 
-        # Chart count should be 15 (13 baseline + 2 new histograms)
+        # Chart count should be 16 (13 baseline + 2 new histograms + 1 compare chart)
         unknown_count = sum(1 for el in at.main if type(el).__name__ == "UnknownElement")
-        assert unknown_count == 15, (
-            f"Expected 15 charts (13 baseline + 2 new histograms), got {unknown_count}"
+        assert unknown_count == 16, (
+            f"Expected 16 charts (13 baseline + 2 new histograms + 1 compare), got {unknown_count}"
         )
 
 
