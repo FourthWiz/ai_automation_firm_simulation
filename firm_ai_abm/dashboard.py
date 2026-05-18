@@ -678,13 +678,19 @@ def fig_mean_accum_wage_over_time(df: pd.DataFrame) -> go.Figure:
 # Strategy display names and fixed colors for multi-strategy comparison.
 _STRATEGY_DISPLAY = {
     "all_H": "All Human",
+    "all_A": "All Augmented",
+    "all_T": "All Automated",
     "greedy_with_switching": "Greedy",
+    "horizon_brute": "Horizon Brute",
     "horizon_optimizer": "Horizon Optimizer",
 }
 _STRATEGY_COLORS = {
     "all_H": THEME["colors"]["H"],
-    "greedy_with_switching": THEME["colors"]["T"],
-    "horizon_optimizer": THEME["colors"]["A"],
+    "all_A": THEME["colors"]["A"],
+    "all_T": THEME["colors"]["T"],
+    "greedy_with_switching": "#8C5E00",   # amber — mixed/uncertain bet
+    "horizon_brute": "#6B4ECC",           # violet — brute optimizer
+    "horizon_optimizer": "#0077AA",       # blue — DP optimizer
 }
 
 

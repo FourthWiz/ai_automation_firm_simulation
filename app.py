@@ -277,11 +277,22 @@ def _build_controls() -> tuple:
             key="strategy",
             horizontal=True,
         )
-        st.caption(
-            "horizon_optimizer uses DP with optimistic priors at t=0 — "
-            "recommends all-A until per-task alpha/beta are learned. "
-            "Use horizon_brute to compare the brute-grid approach."
-        )
+        if strategy == "horizon_brute":
+            st.caption(
+                "horizon_brute evaluates all_H, all_A, and all_T at each step "
+                "and picks whichever yields the highest expected profit — "
+                "a brute-force benchmark. The H/A/T mode mix below shows what it chose."
+            )
+        elif strategy == "horizon_optimizer":
+            st.caption(
+                "horizon_optimizer uses DP rolling-horizon with optimistic priors "
+                "(dp_prior_alpha=0.85) — bets on automation until per-task alpha is learned."
+            )
+        else:
+            st.caption(
+                "horizon_brute: brute-searches all_H / all_A / all_T each step. "
+                "horizon_optimizer: DP with optimistic automation prior."
+            )
 
     with col_a2:
         T = st.number_input(
@@ -571,6 +582,18 @@ def _build_controls() -> tuple:
                 key="seed",
             )
 
+        st.divider()
+        compare_strategies = st.checkbox(
+            "Auto-run strategy comparison on Compare tab",
+            value=False,
+            key="compare_strategies",
+            help=(
+                "When checked, the Compare strategies tab runs all strategies automatically "
+                "whenever params change (same as clicking Run comparison manually). "
+                "Unchecked = explicit button required."
+            ),
+        )
+
     # ------------------------------------------------------------------
     # D-01: inline UI→kernel mapping for hiring_mode radio
     # ------------------------------------------------------------------
@@ -657,12 +680,6 @@ def main() -> None:
     # ------------------------------------------------------------------
     # P1-7: Run button + Reset button
     # ------------------------------------------------------------------
-    compare_strategies = st.checkbox(
-        "Compare strategies (All Human / Greedy / Horizon Optimizer)",
-        value=True,
-        key="compare_strategies",
-        help="Show a three-strategy cumulative profit comparison in the Outcomes tab.",
-    )
     run_col, reset_col = st.columns([3, 1])
     with run_col:
         run_clicked = st.button("▶ Run simulation", type="primary", key="run_button")
@@ -737,10 +754,21 @@ def main() -> None:
         "Automated": float((modes_arr == int(Mode.T)).mean()),
     }
     dom_mode = max(shares, key=shares.get)
-    k1, k2, k3 = st.columns(3)
+    k1, k2, k3, k4, k5 = st.columns(5)
     k1.metric("Cumulative profit", f"{cum_pi:.2f}")
     k2.metric("Final workforce (K)", f"{final_K}")
-    k3.metric("Dominant mode", dom_mode, f"{shares[dom_mode]*100:.0f}% of tasks")
+    k3.metric("H (human)", f"{shares['Human']*100:.0f}%",
+              delta="dominant" if dom_mode == "Human" else None)
+    k4.metric("A (augmented)", f"{shares['Augmented']*100:.0f}%",
+              delta="dominant" if dom_mode == "Augmented" else None)
+    k5.metric("T (automated)", f"{shares['Automated']*100:.0f}%",
+              delta="dominant" if dom_mode == "Automated" else None)
+    if active_strategy == "horizon_brute":
+        st.caption(
+            f"horizon_brute chose: {shares['Human']*100:.0f}% Human · "
+            f"{shares['Augmented']*100:.0f}% Augmented · "
+            f"{shares['Automated']*100:.0f}% Automated (time-averaged across all tasks)"
+        )
 
     # ------------------------------------------------------------------
     # P1-6: 5-tab plot layout
@@ -765,28 +793,13 @@ def main() -> None:
         wages_slice = np.array([])
         a_trained_slice = np.array([], dtype=bool)
 
-    tab_out, tab_work, tab_modes, tab_wages, tab_het = st.tabs([
-        "Outcomes", "Workforce", "Tasks & modes", "Wages", "Worker heterogeneity"
+    tab_out, tab_work, tab_modes, tab_wages, tab_het, tab_compare = st.tabs([
+        "Outcomes", "Workforce", "Tasks & modes", "Wages", "Worker heterogeneity", "Compare strategies"
     ])
 
     with tab_out:
         st.plotly_chart(fig_pi_per_period_over_time(df), width="stretch", key="fig_pi_period")
         st.plotly_chart(fig_pi_over_time(df), width="stretch", key="fig_pi_cumul")
-
-        if compare_strategies:
-            _COMPARE_STRATEGIES = ["all_H", "greedy_with_switching", "horizon_optimizer"]
-            comparison_histories = {}
-            for _cmp_strat in _COMPARE_STRATEGIES:
-                try:
-                    _cmp_result = run_cached(active_key, _cmp_strat)
-                    comparison_histories[_cmp_strat] = _cmp_result[0]
-                except Exception:
-                    pass
-            if comparison_histories:
-                st.plotly_chart(
-                    fig_multi_strategy_compare(comparison_histories),
-                    width="stretch", key="fig_compare",
-                )
 
     with tab_work:
         st.plotly_chart(fig_K_over_time(df), width="stretch", key="fig_K")
@@ -829,6 +842,42 @@ def main() -> None:
         else:
             st.plotly_chart(fig_theta_histogram(np.array(theta_final)), width="stretch", key="fig_theta_hist")
             st.plotly_chart(fig_mean_theta_over_time(df), width="stretch", key="fig_mean_theta")
+
+    with tab_compare:
+        st.markdown(
+            "Plot cumulative profit for **all strategies** under the current parameters. "
+            "Runs are cached — only strategies not yet computed require simulation time."
+        )
+        _compare_stale = (
+            "comparison_run_key" in st.session_state
+            and st.session_state["comparison_run_key"] != active_key
+        )
+        if _compare_stale:
+            st.warning("Parameters changed since last comparison — click Run comparison to refresh.", icon="⚠️")
+
+        # Auto-run if compare_strategies checkbox (Advanced) is checked and params changed.
+        _auto_compare = bool(st.session_state.get("compare_strategies", False))
+        _should_run_compare = st.button("▶ Run comparison", key="run_comparison") or (
+            _auto_compare and _compare_stale
+        ) or (
+            _auto_compare and "comparison_histories" not in st.session_state
+        )
+        if _should_run_compare:
+            with st.spinner("Running all strategies…"):
+                _comparison_histories = {}
+                for _cmp_strat in _STRATEGY_REGISTRY:
+                    try:
+                        _cmp_result = run_cached(active_key, _cmp_strat)
+                        _comparison_histories[_cmp_strat] = _cmp_result[0]
+                    except Exception:
+                        pass
+                st.session_state["comparison_histories"] = _comparison_histories
+                st.session_state["comparison_run_key"] = active_key
+        if st.session_state.get("comparison_histories"):
+            st.plotly_chart(
+                fig_multi_strategy_compare(st.session_state["comparison_histories"]),
+                width="stretch", key="fig_compare_all",
+            )
 
     # ------------------------------------------------------------------
     # Footer

@@ -41,42 +41,43 @@ def test_advanced_expander_collapsed_by_default():
 
 
 def test_kpi_strip_after_run():
-    """P1-11.14: KPI strip shows 3 metrics with expected labels after run."""
+    """P1-11.14: KPI strip shows 5 metrics with expected labels after run.
+
+    Layout: Cumulative profit | Final workforce (K) | H (human) | A (augmented) | T (automated).
+    """
     at = _get_at()
     assert not at.exception
     run_btn = _find_run_btn(at)
     at = run_btn.click().run()
     assert not at.exception
     metrics = list(at.metric)
-    assert len(metrics) >= 3, f"Expected at least 3 metrics in KPI strip, got {len(metrics)}"
+    assert len(metrics) >= 5, f"Expected at least 5 metrics in KPI strip, got {len(metrics)}"
     metric_labels = [m.label for m in metrics]
     assert "Cumulative profit" in metric_labels, f"Missing 'Cumulative profit'. Got: {metric_labels}"
     assert "Final workforce (K)" in metric_labels, f"Missing 'Final workforce (K)'. Got: {metric_labels}"
-    assert "Dominant mode" in metric_labels, f"Missing 'Dominant mode'. Got: {metric_labels}"
-    # Dominant mode value must be one of the three modes
-    dom_metric = next(m for m in metrics if m.label == "Dominant mode")
-    assert dom_metric.value in {"Human", "Augmented", "Automated"}, (
-        f"Dominant mode value unexpected: {dom_metric.value}"
-    )
+    assert "H (human)" in metric_labels, f"Missing 'H (human)'. Got: {metric_labels}"
+    assert "A (augmented)" in metric_labels, f"Missing 'A (augmented)'. Got: {metric_labels}"
+    assert "T (automated)" in metric_labels, f"Missing 'T (automated)'. Got: {metric_labels}"
+    # Each mode metric value must be a percentage string
+    for label in ("H (human)", "A (augmented)", "T (automated)"):
+        m = next(m for m in metrics if m.label == label)
+        assert m.value.endswith("%"), f"Mode metric '{label}' value should end with '%': {m.value}"
 
 
 def test_tabs_present():
-    """P1-11.14: 5 plot tabs present with expected labels.
+    """P1-11.14: 6 plot tabs present with expected labels.
 
     Note: at.tabs returns ALL tabs including the 6 advanced-expander tabs
-    (total 11). The plot tabs are always the last 5 in render order.
+    (total 12). The plot tabs are always the last 6 in render order.
     Advanced tabs (D-05): Costs | Strategy & pricing | Heterogeneity |
                           Firing (advanced) | Productivity baseline | Reproducibility
-    Note on asymmetry: adv_tabs[2] was renamed from "Worker heterogeneity" to
-    "Heterogeneity" (beta-dist-task-attrs D-06) to cover both task and worker
-    dispersion controls. The *plot* tab "Worker heterogeneity" retains its old
-    name — it visualizes only worker theta/wage outputs.
+    Plot tabs: Outcomes | Workforce | Tasks & modes | Wages | Worker heterogeneity | Compare strategies
     """
     at = _get_at()
     assert not at.exception
     all_tabs = list(at.tabs)
-    # 11 total: 6 advanced expander tabs + 5 plot tabs (in render order)
-    expected_all_count = 11
+    # 12 total: 6 advanced expander tabs + 6 plot tabs (in render order)
+    expected_all_count = 12
     assert len(all_tabs) == expected_all_count, (
         f"Expected {expected_all_count} total tabs, got {len(all_tabs)}: {[t.label for t in all_tabs]}"
     )
@@ -90,9 +91,12 @@ def test_tabs_present():
     assert actual_advanced_labels == expected_advanced_labels, (
         f"Advanced tab labels mismatch. Expected {expected_advanced_labels}, got {actual_advanced_labels}"
     )
-    # Plot tabs are the last 5 — plot tab retains "Worker heterogeneity" (unchanged)
-    plot_tabs = all_tabs[-5:]
-    expected_plot_labels = ["Outcomes", "Workforce", "Tasks & modes", "Wages", "Worker heterogeneity"]
+    # Plot tabs are the last 6
+    plot_tabs = all_tabs[-6:]
+    expected_plot_labels = [
+        "Outcomes", "Workforce", "Tasks & modes", "Wages",
+        "Worker heterogeneity", "Compare strategies",
+    ]
     actual_plot_labels = [t.label for t in plot_tabs]
     assert actual_plot_labels == expected_plot_labels, (
         f"Plot tab labels mismatch. Expected {expected_plot_labels}, got {actual_plot_labels}"
@@ -132,7 +136,8 @@ def test_tab_het_sigma_theta_zero_renders():
     """P1-11.14: tab_het with sigma_theta=0 still renders 2 charts (degenerate inputs).
 
     P1-6 chose option (b): render both charts with empty inputs when sigma_theta=0.
-    This preserves the 16-plot count (post T-09: compare chart adds 1) regardless of sigma_theta value.
+    This preserves the 15-plot count regardless of sigma_theta value.
+    Compare tab adds 0 charts on fresh load (requires button click).
     """
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_file("app.py", default_timeout=60).run()
@@ -145,10 +150,10 @@ def test_tab_het_sigma_theta_zero_renders():
     run_btn = _find_run_btn(at)
     at = run_btn.click().run()
     assert not at.exception
-    # Plot count should still be 16 (degenerate empty charts; post T-09: compare chart adds 1)
+    # Plot count should still be 15 (degenerate empty charts; compare tab = 0 without button click)
     unknown_count = sum(1 for el in at.main if type(el).__name__ == "UnknownElement")
-    assert unknown_count == 16, (
-        f"Expected 16 UnknownElements with sigma_theta=0, got {unknown_count}"
+    assert unknown_count == 15, (
+        f"Expected 15 UnknownElements with sigma_theta=0, got {unknown_count}"
     )
 
 

@@ -493,19 +493,20 @@ class TestAppSmoke:
                 )
 
     def test_main_panel_has_13_plots(self):
-        """P1-11.2: Main panel renders 16 plotly charts (as UnknownElement in AppTest).
+        """P1-11.2: Main panel renders 15 plotly charts (as UnknownElement in AppTest).
 
         P1-2a spike result: st.plotly_chart → UnknownElement; tabs expose inner content
-        in at.main. Empirical count = 16 UnknownElements (post T-09: compare chart adds 1
-        to tab_out; tabs layout 3+3+4+4+2 = 16).
+        in at.main. Empirical count = 15 UnknownElements (tab_out=2, tab_work=3,
+        tab_modes=4, tab_wages=4, tab_het=2; Compare tab renders 0 on fresh load —
+        requires explicit button click).
         Verified on Streamlit 1.45.
         """
         from streamlit.testing.v1 import AppTest
         at = AppTest.from_file("app.py", default_timeout=60).run()
         assert not at.exception
         unknown_count = sum(1 for el in at.main if type(el).__name__ == "UnknownElement")
-        assert unknown_count == 16, (
-            f"Expected 16 st.plotly_chart (UnknownElement) in main panel, got {unknown_count}"
+        assert unknown_count == 15, (
+            f"Expected 15 st.plotly_chart (UnknownElement) in main panel, got {unknown_count}"
         )
 
     def test_footer_caption_content(self):
