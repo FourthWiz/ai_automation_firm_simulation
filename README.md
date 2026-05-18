@@ -1,3 +1,15 @@
+---
+title: Firm Behavior Under AI
+emoji: 🤖
+colorFrom: indigo
+colorTo: green
+sdk: streamlit
+sdk_version: "1.39.0"
+app_file: app.py
+pinned: false
+license: mit
+---
+
 # FirmBehavior
 
 Agent-based simulation of tech firms responding to AI. Firms choose between human, AI-augmented, and automated production modes across a portfolio of tasks. A labor market layer adds worker mobility and wage spillovers.

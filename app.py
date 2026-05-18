@@ -22,6 +22,7 @@ Run:
 
 import dataclasses
 import math
+import os
 import time
 import traceback
 import warnings
@@ -70,7 +71,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-PLAUSIBLE_DOMAIN = ""  # Set to live domain at deploy time (e.g. "firm-behavior.streamlit.app")
+PLAUSIBLE_DOMAIN = os.environ.get("PLAUSIBLE_DOMAIN", "")  # Set via HF Space secret/env var
 # Plausible is cookieless and GDPR-friendly; tracks page-view count and country only.
 if PLAUSIBLE_DOMAIN:
     st.markdown(
