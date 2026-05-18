@@ -65,7 +65,7 @@ from firm_ai_abm.production import Mode
 
 # set_page_config MUST be the first Streamlit call at module level
 st.set_page_config(
-    page_title="Firm Behavior under AI — Simulator",
+    page_title="Firm Behavior under AI Transformation — Simulator",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -643,7 +643,7 @@ def _build_controls() -> tuple:
 
 def main() -> None:
     """Main app entry point."""
-    st.title("Firm Behavior under AI")
+    st.title("Firm Behavior under AI Transformation")
     st.caption(
         "An agent-based simulator of how firms choose between human, AI-augmented, "
         "and fully automated production. Adjust the dials, hit Run, and see how "
